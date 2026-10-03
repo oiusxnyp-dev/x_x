@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+venv/
+.venv/
+
+# Secrets
+.env
+*.env
+
+# Databases / runtime data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Telegram sessions
+*.session
+*.session-journal
+
+# Logs
+*.log
+logs/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
