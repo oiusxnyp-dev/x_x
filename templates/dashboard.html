@@ -116,41 +116,7 @@
 </main>
 
 
-<script>
-async function refreshWallet() {
-    try {
-        const response = await fetch("/api/wallet", {
-            cache: "no-store"
-        });
-
-        const data = await response.json();
-
-        if (!data.ok) {
-            return;
-        }
-
-        const values = {
-            "wallet-equity": data.equity,
-            "wallet-wallet": data.wallet,
-            "wallet-available": data.available,
-            "wallet-unrealised": data.unrealised
-        };
-
-        for (const [id, value] of Object.entries(values)) {
-            const element = document.getElementById(id);
-
-            if (element && value !== null && value !== undefined) {
-                element.textContent = value;
-            }
-        }
-    } catch (error) {
-        console.error("Wallet refresh failed:", error);
-    }
-}
-
-setInterval(refreshWallet, 3000);
-</script>
-
+<script src="/static/dashboard.js"></script>
 </body>
 
 </html>

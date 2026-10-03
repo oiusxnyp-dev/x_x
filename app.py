@@ -5,13 +5,15 @@ import sqlite3
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
 
 from get_session import get_session
+from bybit_ws import ensure_bybit_realtime
+from realtime import realtime
 from user_db import authenticate_user, get_user_by_id
 
 
@@ -268,3 +270,71 @@ async def wallet_api(request: Request):
             "ok": False,
             "error": str(exc),
         }
+
+
+@app.websocket("/ws")
+async def realtime_websocket(websocket: WebSocket):
+    user_id = websocket.session.get("user_id")
+
+    if not user_id:
+        await websocket.close(code=1008)
+        return
+
+    user = get_user_by_id(int(user_id))
+
+    if (
+        not user
+        or not int(user["approved"])
+        or not int(user["enabled"])
+    ):
+        await websocket.close(code=1008)
+        return
+
+    user_id = int(user["id"])
+
+    try:
+        await asyncio.to_thread(
+            ensure_bybit_realtime,
+            user_id,
+        )
+    except Exception as exc:
+        print(
+            "[WEB WS] realtime start failed "
+            f"user_id={user_id} error={exc}",
+            flush=True,
+        )
+        await websocket.close(code=1011)
+        return
+
+    await websocket.accept()
+
+    print(
+        f"[WEB WS] connected user_id={user_id}",
+        flush=True,
+    )
+
+    try:
+        while True:
+            snapshot = realtime.snapshot(user_id)
+
+            await websocket.send_json({
+                "type": "realtime",
+                **snapshot,
+            })
+
+            # ticker는 내부에서 ~100ms 수준으로 갱신된다.
+            # 브라우저에도 최대 10Hz로 전달.
+            await asyncio.sleep(0.1)
+
+    except WebSocketDisconnect:
+        print(
+            f"[WEB WS] disconnected user_id={user_id}",
+            flush=True,
+        )
+
+    except Exception as exc:
+        print(
+            "[WEB WS] error "
+            f"user_id={user_id} error={exc}",
+            flush=True,
+        )
