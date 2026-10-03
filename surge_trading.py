@@ -1768,93 +1768,158 @@ def get_symbol_order_info(
     symbol: str,
 ):
     """
-    주문 수량 계산에 필요한 Bybit 종목 정보 조회.
+    주문 수량 계산에 필요한 종목 정보를 반환한다.
 
-    아직 주문하지 않는다.
+    정적 instrument 규칙:
+      instruments.db 사용
+
+    실시간 가격:
+      Bybit ticker API 사용
+
+    instruments.db에 종목이 없으면 신규상장 가능성이 있으므로
+    instrument cache 전체 refresh를 1회 수행한 뒤 다시 조회한다.
     """
     from get_session import get_session
+
+    user_id = int(user_id)
 
     symbol = str(symbol).upper().strip()
 
     if not symbol.endswith("USDT"):
         symbol += "USDT"
 
-    session = get_session(int(user_id))
+    # --------------------------------------------------------
+    # 1. Static instrument info -> local DB
+    # --------------------------------------------------------
+
+    instrument = get_cached_instrument(
+        symbol
+    )
+
+    instrument_refreshed = False
+
+    if instrument is None:
+        refresh_instrument_cache(
+            user_id
+        )
+
+        instrument_refreshed = True
+
+        instrument = get_cached_instrument(
+            symbol
+        )
+
+    if instrument is None:
+        raise RuntimeError(
+            f"Instrument not found after refresh: {symbol}"
+        )
+
+    if str(
+        instrument.get("status") or ""
+    ) != "Trading":
+        raise RuntimeError(
+            "Instrument is not Trading: "
+            f"{symbol} "
+            f"status={instrument.get('status')}"
+        )
+
+    # --------------------------------------------------------
+    # 2. Realtime price -> ticker API
+    # --------------------------------------------------------
+
+    session = get_session(user_id)
 
     if session is None:
         raise RuntimeError(
             f"Bybit session not found: user_id={user_id}"
         )
 
-    instrument_result = session.get_instruments_info(
+    ticker_response = session.get_tickers(
         category="linear",
         symbol=symbol,
     )
 
-    rows = (
-        instrument_result
-        .get("result", {})
-        .get("list", [])
+    ticker_result = ticker_response.get(
+        "result",
+        {}
     )
 
-    if not rows:
-        raise RuntimeError(
-            f"Bybit instrument not found: {symbol}"
-        )
-
-    item = rows[0]
-    lot = item.get("lotSizeFilter", {})
-
-    ticker_result = session.get_tickers(
-        category="linear",
-        symbol=symbol,
-    )
-
-    ticker_rows = (
-        ticker_result
-        .get("result", {})
-        .get("list", [])
+    ticker_rows = ticker_result.get(
+        "list",
+        []
     )
 
     if not ticker_rows:
         raise RuntimeError(
-            f"Bybit ticker not found: {symbol}"
+            f"Ticker not found: {symbol}"
         )
 
     ticker = ticker_rows[0]
 
+    # markPrice 우선.
+    # 없으면 lastPrice fallback.
     price = float(
-        ticker.get("lastPrice") or 0
+        ticker.get("markPrice")
+        or ticker.get("lastPrice")
+        or 0
     )
 
     if price <= 0:
         raise RuntimeError(
-            f"Invalid last price: {symbol}"
+            f"Invalid ticker price: {symbol}"
         )
 
     return {
-        "symbol": symbol,
-        "price": price,
+        "symbol":
+            symbol,
 
-        "min_order_qty": float(
-            lot.get("minOrderQty") or 0
-        ),
+        "price":
+            price,
 
-        "qty_step": float(
-            lot.get("qtyStep") or 0
-        ),
+        "min_order_qty":
+            float(
+                instrument["min_order_qty"]
+            ),
 
-        "max_market_qty": float(
-            lot.get("maxMktOrderQty")
-            or lot.get("maxOrderQty")
-            or 0
-        ),
+        "qty_step":
+            float(
+                instrument["qty_step"]
+            ),
 
-        "min_notional": float(
-            lot.get("minNotionalValue") or 0
-        ),
+        "max_market_qty":
+            float(
+                instrument["max_market_qty"]
+            ),
+
+        "max_order_qty":
+            float(
+                instrument["max_order_qty"]
+            ),
+
+        "min_notional":
+            float(
+                instrument["min_notional"]
+            ),
+
+        "tick_size":
+            float(
+                instrument["tick_size"]
+            ),
+
+        "max_leverage":
+            float(
+                instrument["max_leverage"]
+            ),
+
+        "instrument_source":
+            "DB",
+
+        "instrument_refreshed":
+            instrument_refreshed,
+
+        "price_source":
+            "TICKER",
     }
-
 
 def calculate_surge_order_qty(
     *,
@@ -3987,3 +4052,412 @@ def execute_surge_market_order(
         "response": response,
         "reconcile": reconcile,
     }
+
+
+# ============================================================
+# Bybit Linear Instrument local cache
+# ============================================================
+
+INSTRUMENT_DB = BASE_DIR / "instruments.db"
+
+
+def init_instrument_db():
+    """
+    Bybit USDT Linear instrument 영구 캐시.
+    """
+    with sqlite3.connect(INSTRUMENT_DB) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS instruments (
+                symbol TEXT PRIMARY KEY,
+
+                status TEXT NOT NULL,
+
+                min_order_qty REAL NOT NULL,
+                qty_step REAL NOT NULL,
+                max_market_qty REAL NOT NULL,
+                max_order_qty REAL NOT NULL,
+                min_notional REAL NOT NULL,
+
+                tick_size REAL NOT NULL DEFAULT 0,
+                max_leverage REAL NOT NULL DEFAULT 0,
+
+                updated_at TEXT NOT NULL
+                    DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS
+            idx_instruments_status
+            ON instruments(status)
+        """)
+
+        con.commit()
+
+
+def get_cached_instrument(
+    symbol: str,
+):
+    """
+    instruments.db에서 단일 종목 조회.
+    API 호출하지 않는다.
+    """
+    init_instrument_db()
+
+    symbol = str(symbol).upper().strip()
+
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+
+    with sqlite3.connect(INSTRUMENT_DB) as con:
+        con.row_factory = sqlite3.Row
+
+        row = con.execute("""
+            SELECT *
+            FROM instruments
+            WHERE symbol = ?
+        """, (symbol,)).fetchone()
+
+    return dict(row) if row else None
+
+
+def get_cached_linear_symbols():
+    """
+    DB에 저장된 Trading 상태의 USDT Linear symbol 목록.
+    API 호출하지 않는다.
+    """
+    init_instrument_db()
+
+    with sqlite3.connect(INSTRUMENT_DB) as con:
+        rows = con.execute("""
+            SELECT symbol
+            FROM instruments
+            WHERE status = 'Trading'
+              AND symbol LIKE '%USDT'
+            ORDER BY symbol
+        """).fetchall()
+
+    return [
+        str(row[0]).upper()
+        for row in rows
+    ]
+
+
+def upsert_instrument_rows(rows):
+    """
+    Bybit instrument rows를 DB에 UPSERT.
+
+    기존 DB 전체를 삭제하지 않는다.
+    신규 종목은 추가하고 기존 종목의 규칙 변경은 갱신한다.
+    """
+    init_instrument_db()
+
+    count = 0
+
+    with sqlite3.connect(INSTRUMENT_DB) as con:
+        for item in rows:
+            symbol = str(
+                item.get("symbol") or ""
+            ).upper().strip()
+
+            if not symbol.endswith("USDT"):
+                continue
+
+            lot = item.get(
+                "lotSizeFilter"
+            ) or {}
+
+            price_filter = item.get(
+                "priceFilter"
+            ) or {}
+
+            leverage_filter = item.get(
+                "leverageFilter"
+            ) or {}
+
+            con.execute("""
+                INSERT INTO instruments (
+                    symbol,
+                    status,
+                    min_order_qty,
+                    qty_step,
+                    max_market_qty,
+                    max_order_qty,
+                    min_notional,
+                    tick_size,
+                    max_leverage,
+                    updated_at
+                )
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT(symbol)
+                DO UPDATE SET
+                    status = excluded.status,
+                    min_order_qty =
+                        excluded.min_order_qty,
+                    qty_step =
+                        excluded.qty_step,
+                    max_market_qty =
+                        excluded.max_market_qty,
+                    max_order_qty =
+                        excluded.max_order_qty,
+                    min_notional =
+                        excluded.min_notional,
+                    tick_size =
+                        excluded.tick_size,
+                    max_leverage =
+                        excluded.max_leverage,
+                    updated_at =
+                        CURRENT_TIMESTAMP
+            """, (
+                symbol,
+                str(
+                    item.get("status")
+                    or ""
+                ),
+                float(
+                    lot.get("minOrderQty")
+                    or 0
+                ),
+                float(
+                    lot.get("qtyStep")
+                    or 0
+                ),
+                float(
+                    lot.get("maxMktOrderQty")
+                    or lot.get("maxOrderQty")
+                    or 0
+                ),
+                float(
+                    lot.get("maxOrderQty")
+                    or 0
+                ),
+                float(
+                    lot.get("minNotionalValue")
+                    or 0
+                ),
+                float(
+                    price_filter.get("tickSize")
+                    or 0
+                ),
+                float(
+                    leverage_filter.get(
+                        "maxLeverage"
+                    )
+                    or 0
+                ),
+            ))
+
+            count += 1
+
+        con.commit()
+
+    return count
+
+
+def refresh_instrument_cache(
+    user_id: int,
+):
+    """
+    Bybit Linear instruments 전체 페이지를 읽어서
+    instruments.db에 UPSERT.
+
+    기존 행을 DELETE하지 않는다.
+    """
+    from get_session import get_session
+
+    session = get_session(int(user_id))
+
+    if session is None:
+        raise RuntimeError(
+            f"Bybit session not found: user_id={user_id}"
+        )
+
+    cursor = None
+    api_rows = 0
+    saved_rows = 0
+    pages = 0
+
+    while True:
+        kwargs = {
+            "category": "linear",
+            "limit": 1000,
+        }
+
+        if cursor:
+            kwargs["cursor"] = cursor
+
+        result = session.get_instruments_info(
+            **kwargs
+        )
+
+        data = result.get(
+            "result",
+            {}
+        )
+
+        rows = data.get(
+            "list",
+            []
+        )
+
+        pages += 1
+        api_rows += len(rows)
+
+        saved_rows += upsert_instrument_rows(
+            rows
+        )
+
+        cursor = str(
+            data.get("nextPageCursor")
+            or ""
+        ).strip()
+
+        if not cursor:
+            break
+
+    return {
+        "pages": pages,
+        "api_rows": api_rows,
+        "saved_rows": saved_rows,
+        "cached_symbols": len(
+            get_cached_linear_symbols()
+        ),
+    }
+
+
+def resolve_surge_symbol_cached(
+    user_id: int,
+    raw_symbol: str,
+    *,
+    refresh_on_miss: bool = True,
+):
+    """
+    Telegram 심볼 확정.
+
+    1. DB exact match
+    2. 정확히 마지막 한 글자만 빠진 유일 후보
+    3. 둘 다 없으면 신규 상장 가능성이 있으므로
+       API 전체 refresh 1회
+    4. refresh 후 다시 판정
+    5. 여전히 0개/복수 후보면 미확정
+
+    반환 mode:
+      EXACT
+      RECOVERED_ONE_CHAR
+      NO_MATCH
+      AMBIGUOUS
+      INVALID
+    """
+
+    raw = normalize_surge_symbol(
+        raw_symbol
+    )
+
+    if not raw:
+        return {
+            "resolved": False,
+            "raw_symbol": raw_symbol,
+            "symbol": None,
+            "trading_symbol": None,
+            "mode": "INVALID",
+            "candidates": [],
+            "refreshed": False,
+        }
+
+    if raw.endswith("USDT"):
+        base = raw[:-4]
+    else:
+        base = raw
+
+    def lookup():
+        symbols = get_cached_linear_symbols()
+
+        requested = base + "USDT"
+
+        if requested in symbols:
+            return {
+                "resolved": True,
+                "raw_symbol": raw_symbol,
+                "symbol": base,
+                "trading_symbol": requested,
+                "mode": "EXACT",
+                "candidates": [requested],
+            }
+
+        candidates = []
+
+        for trading_symbol in symbols:
+            candidate_base = (
+                trading_symbol[:-4]
+            )
+
+            if (
+                candidate_base.startswith(base)
+                and len(candidate_base)
+                    == len(base) + 1
+            ):
+                candidates.append(
+                    trading_symbol
+                )
+
+        candidates.sort()
+
+        if len(candidates) == 1:
+            trading_symbol = candidates[0]
+
+            return {
+                "resolved": True,
+                "raw_symbol": raw_symbol,
+                "symbol":
+                    trading_symbol[:-4],
+                "trading_symbol":
+                    trading_symbol,
+                "mode":
+                    "RECOVERED_ONE_CHAR",
+                "candidates":
+                    candidates,
+            }
+
+        return {
+            "resolved": False,
+            "raw_symbol": raw_symbol,
+            "symbol": None,
+            "trading_symbol": None,
+            "mode": (
+                "AMBIGUOUS"
+                if len(candidates) > 1
+                else "NO_MATCH"
+            ),
+            "candidates": candidates,
+        }
+
+    first = lookup()
+
+    if first["resolved"]:
+        first["refreshed"] = False
+        return first
+
+    # AMBIGUOUS는 API refresh를 해도 추측하면 안 된다.
+    if (
+        first["mode"] == "AMBIGUOUS"
+        or not refresh_on_miss
+    ):
+        first["refreshed"] = False
+        return first
+
+    # NO_MATCH만 신규상장 가능성을 고려하여
+    # instruments API를 한 번 갱신한다.
+    refresh_instrument_cache(
+        user_id
+    )
+
+    second = lookup()
+    second["refreshed"] = True
+
+    return second
+
+
+init_instrument_db()

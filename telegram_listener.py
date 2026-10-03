@@ -5,7 +5,10 @@ import re
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 
-from surge_trading import execute_surge_market_order
+from surge_trading import (
+    execute_surge_market_order,
+    resolve_surge_symbol_cached,
+)
 
 
 load_dotenv(".env")
@@ -63,12 +66,50 @@ async def main():
         print("-" * 80)
         print(text)
 
-        symbol = extract_oi_symbol(text)
+        raw_symbol = extract_oi_symbol(text)
 
-        if symbol:
+        if raw_symbol:
             print()
             print("[OI SIGNAL]")
-            print("symbol =", symbol)
+            print("raw symbol =", raw_symbol)
+
+            resolution = resolve_surge_symbol_cached(
+                2,
+                raw_symbol,
+            )
+
+            print(
+                "resolved   =",
+                resolution.get("resolved"),
+            )
+            print(
+                "mode       =",
+                resolution.get("mode"),
+            )
+            print(
+                "candidates =",
+                resolution.get("candidates"),
+            )
+            print(
+                "refreshed  =",
+                resolution.get("refreshed"),
+            )
+
+            if not resolution.get("resolved"):
+                print(
+                    "[SURGE SKIP] "
+                    "symbol could not be resolved",
+                    flush=True,
+                )
+                print("=" * 80, flush=True)
+                return
+
+            symbol = resolution["symbol"]
+
+            print(
+                "final      =",
+                symbol,
+            )
 
             # ------------------------------------------------
             # Surge executor E2E DRY RUN
