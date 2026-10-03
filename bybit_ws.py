@@ -5,7 +5,8 @@ from pybit.unified_trading import WebSocket
 
 from bybit_credentials import get_bybit_credentials
 from get_session import get_session
-from realtime import realtime
+from realtime import realtime, market_prices
+from surge_trading import get_cached_linear_symbols
 
 
 class BybitRealtime:
@@ -110,29 +111,39 @@ class BybitRealtime:
         if not symbol:
             return
 
-        # Unrealised PnL은 Bybit Mark Price 기준으로 계산한다.
-        # ticker delta에 markPrice가 없는 이벤트에서는
-        # 기존 markPrice를 유지하고 lastPrice로 덮어쓰지 않는다.
-        price = data.get("markPrice")
-
-        if price is None:
-            return
-
-        realtime.set_price(
-            self.user_id,
+        # Public ticker는 모든 user가 공유하는 market cache에 저장.
+        # ticker message는 delta일 수 있으므로 cache가 이전 필드를 유지한다.
+        market_prices.update(
             symbol,
-            price,
+            mark_price=data.get("markPrice"),
+            last_price=data.get("lastPrice"),
+            bid1_price=data.get("bid1Price"),
+            ask1_price=data.get("ask1Price"),
         )
 
+        # 기존 dashboard와의 호환성.
+        # markPrice가 들어온 이벤트에서만 user realtime price도 갱신한다.
+        mark_price = data.get("markPrice")
+
+        if mark_price is not None:
+            realtime.set_price(
+                self.user_id,
+                symbol,
+                mark_price,
+            )
+
     def _ensure_tickers(self):
-        symbols = set(realtime.symbols(self.user_id))
+        # instruments.db에 저장된 Trading USDT Linear 전 종목을
+        # public ticker로 상시 구독한다.
+        symbols = set(
+            get_cached_linear_symbols()
+        )
+
         missing = symbols - self._ticker_symbols
 
         if not missing:
             return
 
-        # pybit에서 추가 ticker subscription을 호출할 수 있으므로
-        # 새로 생긴 보유 종목만 추가 구독한다.
         for symbol in sorted(missing):
             self.public_ws.ticker_stream(
                 symbol=symbol,
@@ -141,12 +152,12 @@ class BybitRealtime:
 
             self._ticker_symbols.add(symbol)
 
-            print(
-                "[BYBIT WS] "
-                f"user_id={self.user_id} "
-                f"ticker={symbol}",
-                flush=True,
-            )
+        print(
+            "[BYBIT WS] "
+            f"global tickers subscribed="
+            f"{len(self._ticker_symbols)}",
+            flush=True,
+        )
 
     def start(self):
         with self._lock:

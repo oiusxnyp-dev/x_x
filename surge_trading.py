@@ -1774,12 +1774,13 @@ def get_symbol_order_info(
       instruments.db 사용
 
     실시간 가격:
-      Bybit ticker API 사용
+      정상 -> 전종목 public ticker WS 공용 cache
+      fallback -> WS miss/stale일 때 Bybit ticker REST
 
     instruments.db에 종목이 없으면 신규상장 가능성이 있으므로
     instrument cache 전체 refresh를 1회 수행한 뒤 다시 조회한다.
     """
-    from get_session import get_session
+    from realtime import market_prices
 
     user_id = int(user_id)
 
@@ -1824,50 +1825,89 @@ def get_symbol_order_info(
         )
 
     # --------------------------------------------------------
-    # 2. Realtime price -> ticker API
+    # 2. Realtime price -> global public ticker WS
     # --------------------------------------------------------
 
-    session = get_session(user_id)
+    ws_row = market_prices.get(
+        symbol
+    )
 
-    if session is None:
-        raise RuntimeError(
-            f"Bybit session not found: user_id={user_id}"
+    ws_age = market_prices.age(
+        symbol
+    )
+
+    price = None
+    price_source = None
+
+    if (
+        ws_row is not None
+        and ws_age is not None
+        and ws_age <= 5.0
+    ):
+        # 기존 주문 계산과 동일하게 markPrice 우선.
+        raw_price = (
+            ws_row.get("markPrice")
+            or ws_row.get("lastPrice")
         )
 
-    ticker_response = session.get_tickers(
-        category="linear",
-        symbol=symbol,
-    )
+        try:
+            price = float(
+                raw_price or 0
+            )
+        except (TypeError, ValueError):
+            price = 0.0
 
-    ticker_result = ticker_response.get(
-        "result",
-        {}
-    )
+        if price > 0:
+            price_source = "WS"
 
-    ticker_rows = ticker_result.get(
-        "list",
-        []
-    )
+    # --------------------------------------------------------
+    # 3. WS miss / stale / invalid -> REST fallback
+    # --------------------------------------------------------
 
-    if not ticker_rows:
-        raise RuntimeError(
-            f"Ticker not found: {symbol}"
+    if price is None or price <= 0:
+        from get_session import get_session
+
+        session = get_session(user_id)
+
+        if session is None:
+            raise RuntimeError(
+                f"Bybit session not found: user_id={user_id}"
+            )
+
+        ticker_response = session.get_tickers(
+            category="linear",
+            symbol=symbol,
         )
 
-    ticker = ticker_rows[0]
-
-    # markPrice 우선.
-    # 없으면 lastPrice fallback.
-    price = float(
-        ticker.get("markPrice")
-        or ticker.get("lastPrice")
-        or 0
-    )
-
-    if price <= 0:
-        raise RuntimeError(
-            f"Invalid ticker price: {symbol}"
+        ticker_result = ticker_response.get(
+            "result",
+            {}
         )
+
+        ticker_rows = ticker_result.get(
+            "list",
+            []
+        )
+
+        if not ticker_rows:
+            raise RuntimeError(
+                f"Ticker not found: {symbol}"
+            )
+
+        ticker = ticker_rows[0]
+
+        price = float(
+            ticker.get("markPrice")
+            or ticker.get("lastPrice")
+            or 0
+        )
+
+        if price <= 0:
+            raise RuntimeError(
+                f"Invalid ticker price: {symbol}"
+            )
+
+        price_source = "REST_FALLBACK"
 
     return {
         "symbol":
@@ -1918,7 +1958,10 @@ def get_symbol_order_info(
             instrument_refreshed,
 
         "price_source":
-            "TICKER",
+            price_source,
+
+        "price_age":
+            ws_age,
     }
 
 def calculate_surge_order_qty(
@@ -2245,6 +2288,211 @@ def prepare_surge_order(
     }
 
 
+SURGE_LEVERAGE_DB = BASE_DIR / "surge_leverage.db"
+
+
+def init_surge_leverage_db():
+    """
+    급등매매 계정별/종목별 실제 적용 레버리지 캐시.
+
+    운영 전제:
+      - 외부에서 수동으로 leverage를 변경하지 않는다.
+      - 최초 실제값은 Bybit에서 읽어 저장한다.
+      - 이후 프로그램의 set_leverage 성공 시에만 갱신한다.
+    """
+    with sqlite3.connect(SURGE_LEVERAGE_DB) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS surge_leverage (
+                user_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                leverage REAL NOT NULL,
+                source TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+                    DEFAULT CURRENT_TIMESTAMP,
+
+                PRIMARY KEY (
+                    user_id,
+                    symbol
+                )
+            )
+        """)
+
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS
+                idx_surge_leverage_symbol
+            ON surge_leverage(symbol)
+        """)
+
+        con.commit()
+
+
+def get_cached_surge_leverage(
+    user_id: int,
+    symbol: str,
+):
+    init_surge_leverage_db()
+
+    user_id = int(user_id)
+    symbol = str(symbol).upper().strip()
+
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+
+    with sqlite3.connect(SURGE_LEVERAGE_DB) as con:
+        con.row_factory = sqlite3.Row
+
+        row = con.execute("""
+            SELECT
+                user_id,
+                symbol,
+                leverage,
+                source,
+                updated_at
+            FROM surge_leverage
+            WHERE user_id = ?
+              AND symbol = ?
+        """, (
+            user_id,
+            symbol,
+        )).fetchone()
+
+    if row is None:
+        return None
+
+    return dict(row)
+
+
+def upsert_cached_surge_leverage(
+    user_id: int,
+    symbol: str,
+    leverage: float,
+    *,
+    source: str,
+):
+    init_surge_leverage_db()
+
+    user_id = int(user_id)
+    symbol = str(symbol).upper().strip()
+    leverage = float(leverage)
+    source = str(source).strip()
+
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+
+    if leverage <= 0:
+        raise ValueError(
+            f"Invalid leverage cache value: {leverage}"
+        )
+
+    if not source:
+        raise ValueError(
+            "Leverage cache source is required"
+        )
+
+    with sqlite3.connect(SURGE_LEVERAGE_DB) as con:
+        con.execute("""
+            INSERT INTO surge_leverage (
+                user_id,
+                symbol,
+                leverage,
+                source,
+                updated_at
+            )
+            VALUES (
+                ?, ?, ?, ?, CURRENT_TIMESTAMP
+            )
+            ON CONFLICT(user_id, symbol)
+            DO UPDATE SET
+                leverage = excluded.leverage,
+                source = excluded.source,
+                updated_at = CURRENT_TIMESTAMP
+        """, (
+            user_id,
+            symbol,
+            leverage,
+            source,
+        ))
+
+        con.commit()
+
+    return get_cached_surge_leverage(
+        user_id,
+        symbol,
+    )
+
+
+def seed_surge_leverage_cache(
+    user_id: int,
+    symbol: str,
+):
+    """
+    DB에 값이 없을 때만 Bybit에서 현재 leverage를 읽어 저장한다.
+
+    set_leverage는 절대 호출하지 않는다.
+    """
+    user_id = int(user_id)
+    symbol = str(symbol).upper().strip()
+
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+
+    cached = get_cached_surge_leverage(
+        user_id,
+        symbol,
+    )
+
+    if cached is not None:
+        return {
+            "seeded": False,
+            "cached": cached,
+            "reason": "CACHE_HIT",
+        }
+
+    current = get_current_symbol_leverage(
+        user_id,
+        symbol,
+    )
+
+    values = current.get("leverages") or []
+
+    if not values:
+        return {
+            "seeded": False,
+            "cached": None,
+            "reason": "NO_LEVERAGE_FOUND",
+            "current": current,
+        }
+
+    # set_surge_leverage()는 Buy/Sell을 동일하게 설정하므로
+    # cache도 단일 leverage를 전제로 한다.
+    unique = sorted({
+        float(value)
+        for value in values
+    })
+
+    if len(unique) != 1:
+        return {
+            "seeded": False,
+            "cached": None,
+            "reason": "LEVERAGE_MISMATCH",
+            "current": current,
+        }
+
+    cached = upsert_cached_surge_leverage(
+        user_id,
+        symbol,
+        unique[0],
+        source="BYBIT_SEED",
+    )
+
+    return {
+        "seeded": True,
+        "cached": cached,
+        "reason": "SEEDED",
+        "current": current,
+    }
+
+
 def get_current_symbol_leverage(
     user_id: int,
     symbol: str,
@@ -2327,39 +2575,63 @@ def ensure_surge_leverage(
     dry_run: bool = True,
 ):
     """
-    목표 레버리지와 현재 레버리지를 비교한다.
+    목표 leverage와 로컬 캐시의 마지막 실제 적용값을 비교한다.
 
-    현재 설정이 모두 목표값이면:
-      -> set_leverage 호출 생략
-
-    다르면:
-      dry_run=True
-        -> 변경 예정만 반환
-
-      dry_run=False
-        -> 실제 set_leverage 실행
+    운영 전제:
+      - 유저가 Bybit에서 leverage를 수동 변경하지 않는다.
+      - cache miss일 때만 Bybit에서 현재값을 조회한다.
+      - 실제 set_leverage 성공 후에만 cache를 갱신한다.
     """
+    user_id = int(user_id)
     target = float(leverage)
 
-    current = get_current_symbol_leverage(
+    symbol = str(symbol).upper().strip()
+
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+
+    cached = get_cached_surge_leverage(
         user_id,
         symbol,
     )
 
-    current_values = current["leverages"]
+    cache_seeded = False
+
+    if cached is None:
+        seed = seed_surge_leverage_cache(
+            user_id,
+            symbol,
+        )
+
+        cached = seed.get("cached")
+        cache_seeded = bool(
+            seed.get("seeded")
+        )
+
+        if cached is None:
+            raise RuntimeError(
+                "Unable to determine current leverage: "
+                f"symbol={symbol} "
+                f"reason={seed.get('reason')}"
+            )
+
+    current_value = float(
+        cached["leverage"]
+    )
+
+    current_values = [
+        current_value
+    ]
 
     already_set = (
-        bool(current_values)
-        and all(
-            abs(value - target) < 1e-12
-            for value in current_values
-        )
+        abs(current_value - target)
+        < 1e-12
     )
 
     if already_set:
         return {
-            "user_id": int(user_id),
-            "symbol": current["symbol"],
+            "user_id": user_id,
+            "symbol": symbol,
             "target_leverage": target,
             "current_leverages": current_values,
             "already_set": True,
@@ -2367,12 +2639,14 @@ def ensure_surge_leverage(
             "dry_run": bool(dry_run),
             "changed": False,
             "response": None,
+            "leverage_source": "CACHE",
+            "cache_seeded": cache_seeded,
         }
 
     if dry_run:
         return {
-            "user_id": int(user_id),
-            "symbol": current["symbol"],
+            "user_id": user_id,
+            "symbol": symbol,
             "target_leverage": target,
             "current_leverages": current_values,
             "already_set": False,
@@ -2380,25 +2654,43 @@ def ensure_surge_leverage(
             "dry_run": True,
             "changed": False,
             "response": None,
+            "leverage_source": "CACHE",
+            "cache_seeded": cache_seeded,
         }
 
     result = set_surge_leverage(
         user_id,
-        current["symbol"],
+        symbol,
         target,
         dry_run=False,
     )
 
+    if not result["changed"]:
+        raise RuntimeError(
+            "set_surge_leverage returned without change: "
+            f"symbol={symbol} target={target}"
+        )
+
+    updated = upsert_cached_surge_leverage(
+        user_id,
+        symbol,
+        target,
+        source="SET_LEVERAGE",
+    )
+
     return {
-        "user_id": int(user_id),
-        "symbol": current["symbol"],
+        "user_id": user_id,
+        "symbol": symbol,
         "target_leverage": target,
         "current_leverages": current_values,
         "already_set": False,
         "skipped": False,
         "dry_run": False,
-        "changed": result["changed"],
+        "changed": True,
         "response": result["response"],
+        "leverage_source": "CACHE",
+        "cache_seeded": cache_seeded,
+        "cache_updated": updated,
     }
 
 
@@ -2485,11 +2777,72 @@ def prepare_surge_order_final(
         dry_run=not apply_leverage,
     )
 
-    final_plan = rebuild_surge_order_after_leverage(
-        user_id,
-        symbol,
-        entry_percent=entry_percent,
+    # --------------------------------------------------------
+    # Final plan
+    #
+    # DRY-RUN:
+    #   leverage/account 상태를 실제로 변경하지 않았으므로
+    #   initial account snapshot을 그대로 재사용한다.
+    #
+    # LIVE:
+    #   leverage 변경 가능성이 있으므로 기존 설계대로
+    #   Available / Position / Price / qty를 다시 계산한다.
+    # --------------------------------------------------------
+
+    # --------------------------------------------------------
+    # Final account/order snapshot policy
+    #
+    # PREVIEW:
+    #   상태 변경이 없으므로 initial snapshot 재사용.
+    #
+    # LIVE + leverage already set:
+    #   leverage 변경이 실제로 없었으므로 initial snapshot 재사용.
+    #
+    # LIVE + leverage changed:
+    #   set_leverage 이후 Available / Position / Price / qty를
+    #   반드시 다시 계산한다.
+    #
+    # 기타 예상 밖 상태:
+    #   안전하게 final rebuild를 수행한다.
+    # --------------------------------------------------------
+
+    leverage_already_set = bool(
+        leverage_result.get("already_set")
     )
+
+    leverage_changed = bool(
+        leverage_result.get("changed")
+    )
+
+    if not apply_leverage:
+        final_plan = {
+            **initial_plan,
+            "final_recalculated": False,
+            "snapshot_reused": True,
+            "snapshot_reason": "DRY_RUN",
+        }
+
+    elif leverage_already_set:
+        final_plan = {
+            **initial_plan,
+            "final_recalculated": False,
+            "snapshot_reused": True,
+            "snapshot_reason": "LEVERAGE_ALREADY_SET",
+        }
+
+    else:
+        final_plan = rebuild_surge_order_after_leverage(
+            user_id,
+            symbol,
+            entry_percent=entry_percent,
+        )
+
+        final_plan["snapshot_reused"] = False
+        final_plan["snapshot_reason"] = (
+            "LEVERAGE_CHANGED"
+            if leverage_changed
+            else "SAFE_REBUILD"
+        )
 
     return {
         "initial_plan": initial_plan,

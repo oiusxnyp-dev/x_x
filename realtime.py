@@ -149,4 +149,153 @@ class RealtimeState:
         }
 
 
+class MarketPriceState:
+    """
+    Bybit public ticker 공용 가격 캐시.
+
+    public market data는 user별 데이터가 아니므로
+    모든 user / trading / dashboard가 하나의 cache를 공유한다.
+    """
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._prices = {}
+
+    def update(
+        self,
+        symbol,
+        *,
+        mark_price=None,
+        last_price=None,
+        bid1_price=None,
+        ask1_price=None,
+        updated_at=None,
+    ):
+        import time
+
+        symbol = str(symbol or "").upper().strip()
+
+        if not symbol:
+            return
+
+        now = (
+            float(updated_at)
+            if updated_at is not None
+            else time.time()
+        )
+
+        with self._lock:
+            row = self._prices.setdefault(
+                symbol,
+                {
+                    "symbol": symbol,
+                    "markPrice": None,
+                    "lastPrice": None,
+                    "bid1Price": None,
+                    "ask1Price": None,
+                    "updated_at": 0.0,
+                },
+            )
+
+            # ticker는 delta일 수 있으므로
+            # 이번 message에 존재하는 값만 갱신한다.
+            if mark_price is not None:
+                row["markPrice"] = str(mark_price)
+
+            if last_price is not None:
+                row["lastPrice"] = str(last_price)
+
+            if bid1_price is not None:
+                row["bid1Price"] = str(bid1_price)
+
+            if ask1_price is not None:
+                row["ask1Price"] = str(ask1_price)
+
+            row["updated_at"] = now
+
+    def get(self, symbol):
+        symbol = str(symbol or "").upper().strip()
+
+        with self._lock:
+            row = self._prices.get(symbol)
+
+            if row is None:
+                return None
+
+            return dict(row)
+
+    def price(
+        self,
+        symbol,
+        *,
+        prefer="markPrice",
+    ):
+        row = self.get(symbol)
+
+        if row is None:
+            return None
+
+        order = [
+            prefer,
+            "markPrice",
+            "lastPrice",
+            "bid1Price",
+            "ask1Price",
+        ]
+
+        seen = set()
+
+        for key in order:
+            if key in seen:
+                continue
+
+            seen.add(key)
+
+            value = row.get(key)
+
+            if value in (None, ""):
+                continue
+
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                continue
+
+            if value > 0:
+                return value
+
+        return None
+
+    def age(self, symbol):
+        import time
+
+        row = self.get(symbol)
+
+        if row is None:
+            return None
+
+        updated_at = float(
+            row.get("updated_at") or 0
+        )
+
+        if updated_at <= 0:
+            return None
+
+        return max(
+            0.0,
+            time.time() - updated_at,
+        )
+
+    def symbols(self):
+        with self._lock:
+            return sorted(self._prices)
+
+    def count(self):
+        with self._lock:
+            return len(self._prices)
+
+
+market_prices = MarketPriceState()
+
+
 realtime = RealtimeState()
