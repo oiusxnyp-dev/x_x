@@ -48,10 +48,25 @@ class BybitRealtime:
             settleCoin="USDT",
         )
 
+        positions = position_result["result"]["list"]
+
         realtime.replace_positions(
             self.user_id,
-            position_result["result"]["list"],
+            positions,
         )
+
+        # 첫 WebSocket markPrice 이벤트 전에도
+        # REST bootstrap의 Mark Price를 초기값으로 사용한다.
+        for p in positions:
+            symbol = p.get("symbol")
+            mark_price = p.get("markPrice")
+
+            if symbol and mark_price:
+                realtime.set_price(
+                    self.user_id,
+                    symbol,
+                    mark_price,
+                )
 
     def _on_wallet(self, message):
         data = message.get("data") or []
@@ -95,10 +110,10 @@ class BybitRealtime:
         if not symbol:
             return
 
-        price = (
-            data.get("markPrice")
-            or data.get("lastPrice")
-        )
+        # Unrealised PnL은 Bybit Mark Price 기준으로 계산한다.
+        # ticker delta에 markPrice가 없는 이벤트에서는
+        # 기존 markPrice를 유지하고 lastPrice로 덮어쓰지 않는다.
+        price = data.get("markPrice")
 
         if price is None:
             return
