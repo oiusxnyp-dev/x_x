@@ -43,25 +43,25 @@
 
             <div class="wallet-card">
                 <span>Equity</span>
-                <strong>{{ wallet["equity"] }}</strong>
+                <strong><span id="wallet-equity">{{ wallet["equity"] }}</span></strong>
                 <small>USDT</small>
             </div>
 
             <div class="wallet-card">
                 <span>Wallet</span>
-                <strong>{{ wallet["wallet"] }}</strong>
+                <strong><span id="wallet-wallet">{{ wallet["wallet"] }}</span></strong>
                 <small>USDT</small>
             </div>
 
             <div class="wallet-card">
                 <span>Available</span>
-                <strong>{{ wallet["available"] }}</strong>
+                <strong><span id="wallet-available">{{ wallet["available"] }}</span></strong>
                 <small>USDT</small>
             </div>
 
             <div class="wallet-card">
                 <span>Unrealised PnL</span>
-                <strong>{{ wallet["unrealised"] }}</strong>
+                <strong><span id="wallet-unrealised">{{ wallet["unrealised"] }}</span></strong>
                 <small>USDT</small>
             </div>
 
@@ -115,5 +115,42 @@
 
 </main>
 
+
+<script>
+async function refreshWallet() {
+    try {
+        const response = await fetch("/api/wallet", {
+            cache: "no-store"
+        });
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            return;
+        }
+
+        const values = {
+            "wallet-equity": data.equity,
+            "wallet-wallet": data.wallet,
+            "wallet-available": data.available,
+            "wallet-unrealised": data.unrealised
+        };
+
+        for (const [id, value] of Object.entries(values)) {
+            const element = document.getElementById(id);
+
+            if (element && value !== null && value !== undefined) {
+                element.textContent = value;
+            }
+        }
+    } catch (error) {
+        console.error("Wallet refresh failed:", error);
+    }
+}
+
+setInterval(refreshWallet, 3000);
+</script>
+
 </body>
+
 </html>

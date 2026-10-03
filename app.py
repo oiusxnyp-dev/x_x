@@ -240,3 +240,31 @@ async def save_seed(
         "/?saved=1",
         status_code=303,
     )
+
+
+@app.get("/api/wallet")
+async def wallet_api(request: Request):
+    user = current_user(request)
+
+    if not user:
+        return {
+            "ok": False,
+            "error": "not_authenticated",
+        }
+
+    try:
+        wallet = await asyncio.to_thread(
+            get_wallet_sync,
+            int(user["id"]),
+        )
+
+        return {
+            "ok": True,
+            **wallet,
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
