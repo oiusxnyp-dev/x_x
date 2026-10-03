@@ -2764,3 +2764,1226 @@ def calculate_reduced_surge_order(
     )
 
     return result
+
+
+# ============================================================
+# Surge execution idempotency
+# ============================================================
+
+SURGE_EXECUTION_DB = BASE_DIR / "surge_executions.db"
+
+
+def init_surge_execution_db():
+    """
+    멍꿀단 급등매매 전용 실행 중복방지 DB.
+
+    Telegram message 하나에 대해
+    user별 실제 진입은 한 번만 허용한다.
+    """
+    with sqlite3.connect(SURGE_EXECUTION_DB) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS surge_executions (
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+
+                signal_stage INTEGER,
+                entry_percent REAL,
+
+                order_link_id TEXT NOT NULL,
+
+                status TEXT NOT NULL DEFAULT 'CLAIMED',
+
+                order_id TEXT,
+                qty REAL,
+                notional REAL,
+                leverage REAL,
+                risk_id INTEGER,
+                risk_limit REAL,
+
+                error TEXT,
+
+                created_at TEXT NOT NULL
+                    DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL
+                    DEFAULT CURRENT_TIMESTAMP,
+
+                PRIMARY KEY (
+                    user_id,
+                    chat_id,
+                    message_id
+                ),
+
+                UNIQUE (order_link_id)
+            )
+        """)
+
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS
+            idx_surge_executions_status
+            ON surge_executions(status)
+        """)
+
+        con.commit()
+
+
+def surge_order_link_id(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+):
+    """
+    멍꿀단 급등매매 전용 Bybit orderLinkId.
+
+    기존 Telegram 자동매매의 tgs-* 와 구분하기 위해
+    srg-* prefix를 사용한다.
+    """
+    import hashlib
+
+    user_id = int(user_id)
+    chat_id = int(chat_id or 0)
+    message_id = int(message_id)
+
+    raw = (
+        f"surge:{user_id}:{chat_id}:{message_id}"
+    ).encode()
+
+    digest = hashlib.sha256(
+        raw
+    ).hexdigest()[:16]
+
+    return f"srg-{user_id}-{digest}"
+
+
+def claim_surge_execution(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    symbol: str,
+    side: str,
+    *,
+    signal_stage=None,
+    entry_percent=None,
+):
+    """
+    실제 주문 직전에 execution을 CLAIM한다.
+
+    같은
+      user_id + chat_id + message_id
+
+    가 이미 존재하면 False를 반환하여
+    중복 주문을 차단한다.
+    """
+    init_surge_execution_db()
+
+    user_id = int(user_id)
+    chat_id = int(chat_id or 0)
+    message_id = int(message_id)
+
+    symbol = str(symbol).upper().strip()
+    side = str(side).upper().strip()
+
+    if not symbol.endswith("USDT"):
+        symbol += "USDT"
+
+    if side not in ("LONG", "SHORT"):
+        raise ValueError(
+            f"Invalid surge side: {side}"
+        )
+
+    order_link_id = surge_order_link_id(
+        user_id,
+        chat_id,
+        message_id,
+    )
+
+    with sqlite3.connect(SURGE_EXECUTION_DB) as con:
+        cur = con.execute("""
+            INSERT OR IGNORE INTO surge_executions (
+                user_id,
+                chat_id,
+                message_id,
+                symbol,
+                side,
+                signal_stage,
+                entry_percent,
+                order_link_id,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CLAIMED')
+        """, (
+            user_id,
+            chat_id,
+            message_id,
+            symbol,
+            side,
+            (
+                int(signal_stage)
+                if signal_stage is not None
+                else None
+            ),
+            (
+                float(entry_percent)
+                if entry_percent is not None
+                else None
+            ),
+            order_link_id,
+        ))
+
+        con.commit()
+
+        claimed = cur.rowcount == 1
+
+    return {
+        "claimed": claimed,
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "symbol": symbol,
+        "side": side,
+        "order_link_id": order_link_id,
+    }
+
+
+def get_surge_execution(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+):
+    """
+    execution 현재 상태 조회.
+    """
+    init_surge_execution_db()
+
+    with sqlite3.connect(SURGE_EXECUTION_DB) as con:
+        con.row_factory = sqlite3.Row
+
+        row = con.execute("""
+            SELECT *
+            FROM surge_executions
+            WHERE user_id=?
+              AND chat_id=?
+              AND message_id=?
+        """, (
+            int(user_id),
+            int(chat_id or 0),
+            int(message_id),
+        )).fetchone()
+
+    return dict(row) if row else None
+
+
+def complete_surge_execution(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    *,
+    order_id=None,
+    qty=None,
+    notional=None,
+    leverage=None,
+    risk_id=None,
+    risk_limit=None,
+):
+    """
+    주문이 Bybit에 정상 접수된 execution을 ACCEPTED 처리한다.
+
+    체결 완료(FILLED)와는 구분한다.
+    """
+    init_surge_execution_db()
+
+    with sqlite3.connect(SURGE_EXECUTION_DB) as con:
+        cur = con.execute("""
+            UPDATE surge_executions
+            SET
+                status='ACCEPTED',
+                order_id=?,
+                qty=?,
+                notional=?,
+                leverage=?,
+                risk_id=?,
+                risk_limit=?,
+                error=NULL,
+                updated_at=CURRENT_TIMESTAMP
+            WHERE user_id=?
+              AND chat_id=?
+              AND message_id=?
+              AND status='CLAIMED'
+        """, (
+            (
+                str(order_id)
+                if order_id is not None
+                else None
+            ),
+            (
+                float(qty)
+                if qty is not None
+                else None
+            ),
+            (
+                float(notional)
+                if notional is not None
+                else None
+            ),
+            (
+                float(leverage)
+                if leverage is not None
+                else None
+            ),
+            (
+                int(risk_id)
+                if risk_id is not None
+                else None
+            ),
+            (
+                float(risk_limit)
+                if risk_limit is not None
+                else None
+            ),
+            int(user_id),
+            int(chat_id or 0),
+            int(message_id),
+        ))
+
+        con.commit()
+
+        return cur.rowcount == 1
+
+
+def fail_surge_execution(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    error,
+):
+    """
+    주문을 보내지 못했다는 것이 확실한 경우 FAILED 처리.
+
+    행을 삭제하지 않는다.
+    실패 이력을 남겨서 무조건적인 자동 재주문을 막는다.
+    """
+    init_surge_execution_db()
+
+    with sqlite3.connect(SURGE_EXECUTION_DB) as con:
+        cur = con.execute("""
+            UPDATE surge_executions
+            SET
+                status='FAILED',
+                error=?,
+                updated_at=CURRENT_TIMESTAMP
+            WHERE user_id=?
+              AND chat_id=?
+              AND message_id=?
+              AND status='CLAIMED'
+        """, (
+            str(error),
+            int(user_id),
+            int(chat_id or 0),
+            int(message_id),
+        ))
+
+        con.commit()
+
+        return cur.rowcount == 1
+
+
+init_surge_execution_db()
+
+
+# ============================================================
+# Surge order reconcile
+# ============================================================
+
+SURGE_TERMINAL_ORDER_STATUSES = {
+    "Cancelled",
+    "Rejected",
+    "Deactivated",
+}
+
+SURGE_FILLED_ORDER_STATUSES = {
+    "Filled",
+}
+
+
+def reconcile_surge_order(
+    user_id: int,
+    order_link_id: str,
+    symbol: str | None = None,
+):
+    """
+    srg-* 주문을 Bybit에서 조회해 실제 상태를 판정한다.
+
+    조회 순서:
+      1. open/realtime orders
+      2. order history
+      3. executions
+
+    주문은 생성하지 않는다.
+
+    반환 state:
+      ACCEPTED
+      FILLED
+      TERMINAL_FAILED
+      NOT_FOUND
+      UNKNOWN
+    """
+    from get_session import get_session
+
+    user_id = int(user_id)
+    order_link_id = str(order_link_id).strip()
+
+    if not order_link_id:
+        raise ValueError("order_link_id is required")
+
+    trading_symbol = None
+
+    if symbol:
+        trading_symbol = str(symbol).upper().strip()
+
+        if not trading_symbol.endswith("USDT"):
+            trading_symbol += "USDT"
+
+    session = get_session(user_id)
+
+    if session is None:
+        raise RuntimeError(
+            f"Bybit session not found: user_id={user_id}"
+        )
+
+    errors = []
+
+    # --------------------------------------------------------
+    # 1. Realtime / open-order lookup
+    # --------------------------------------------------------
+
+    try:
+        params = {
+            "category": "linear",
+            "orderLinkId": order_link_id,
+        }
+
+        if trading_symbol:
+            params["symbol"] = trading_symbol
+
+        result = session.get_open_orders(**params)
+
+        rows = (
+            result
+            .get("result", {})
+            .get("list", [])
+        )
+
+        if rows:
+            row = rows[0]
+
+            status = str(
+                row.get("orderStatus") or ""
+            )
+
+            if status in SURGE_FILLED_ORDER_STATUSES:
+                state = "FILLED"
+
+            elif status in SURGE_TERMINAL_ORDER_STATUSES:
+                state = "TERMINAL_FAILED"
+
+            else:
+                state = "ACCEPTED"
+
+            return {
+                "state": state,
+                "source": "open_orders",
+                "order_id": row.get("orderId"),
+                "order_link_id": order_link_id,
+                "order_status": status,
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "qty": row.get("qty"),
+                "cum_exec_qty": row.get("cumExecQty"),
+                "avg_price": row.get("avgPrice"),
+                "raw": row,
+                "errors": errors,
+            }
+
+    except Exception as exc:
+        errors.append(
+            f"open_orders: {type(exc).__name__}: {exc}"
+        )
+
+    # --------------------------------------------------------
+    # 2. Order history lookup
+    # --------------------------------------------------------
+
+    try:
+        params = {
+            "category": "linear",
+            "orderLinkId": order_link_id,
+            "limit": 50,
+        }
+
+        if trading_symbol:
+            params["symbol"] = trading_symbol
+
+        result = session.get_order_history(**params)
+
+        rows = (
+            result
+            .get("result", {})
+            .get("list", [])
+        )
+
+        if rows:
+            row = rows[0]
+
+            status = str(
+                row.get("orderStatus") or ""
+            )
+
+            if status in SURGE_FILLED_ORDER_STATUSES:
+                state = "FILLED"
+
+            elif status in SURGE_TERMINAL_ORDER_STATUSES:
+                state = "TERMINAL_FAILED"
+
+            else:
+                state = "ACCEPTED"
+
+            return {
+                "state": state,
+                "source": "order_history",
+                "order_id": row.get("orderId"),
+                "order_link_id": order_link_id,
+                "order_status": status,
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "qty": row.get("qty"),
+                "cum_exec_qty": row.get("cumExecQty"),
+                "avg_price": row.get("avgPrice"),
+                "raw": row,
+                "errors": errors,
+            }
+
+    except Exception as exc:
+        errors.append(
+            f"order_history: {type(exc).__name__}: {exc}"
+        )
+
+    # --------------------------------------------------------
+    # 3. Execution lookup
+    # --------------------------------------------------------
+
+    try:
+        params = {
+            "category": "linear",
+            "orderLinkId": order_link_id,
+            "limit": 100,
+        }
+
+        if trading_symbol:
+            params["symbol"] = trading_symbol
+
+        result = session.get_executions(**params)
+
+        rows = (
+            result
+            .get("result", {})
+            .get("list", [])
+        )
+
+        if rows:
+            total_qty = 0.0
+            total_value = 0.0
+
+            order_id = None
+            found_symbol = None
+            found_side = None
+
+            for row in rows:
+                try:
+                    qty = float(
+                        row.get("execQty") or 0
+                    )
+                except Exception:
+                    qty = 0.0
+
+                try:
+                    price = float(
+                        row.get("execPrice") or 0
+                    )
+                except Exception:
+                    price = 0.0
+
+                total_qty += qty
+                total_value += qty * price
+
+                if order_id is None:
+                    order_id = row.get("orderId")
+
+                if found_symbol is None:
+                    found_symbol = row.get("symbol")
+
+                if found_side is None:
+                    found_side = row.get("side")
+
+            avg_price = (
+                total_value / total_qty
+                if total_qty > 0
+                else 0.0
+            )
+
+            return {
+                "state": "FILLED",
+                "source": "executions",
+                "order_id": order_id,
+                "order_link_id": order_link_id,
+                "order_status": "Filled",
+                "symbol": found_symbol,
+                "side": found_side,
+                "qty": total_qty,
+                "cum_exec_qty": total_qty,
+                "avg_price": avg_price,
+                "raw": rows,
+                "errors": errors,
+            }
+
+    except Exception as exc:
+        errors.append(
+            f"executions: {type(exc).__name__}: {exc}"
+        )
+
+    # --------------------------------------------------------
+    # 조회 자체가 실패했다면 NOT_FOUND라고 단정하면 안 된다.
+    # --------------------------------------------------------
+
+    if errors:
+        return {
+            "state": "UNKNOWN",
+            "source": None,
+            "order_id": None,
+            "order_link_id": order_link_id,
+            "order_status": None,
+            "symbol": trading_symbol,
+            "side": None,
+            "qty": None,
+            "cum_exec_qty": None,
+            "avg_price": None,
+            "raw": None,
+            "errors": errors,
+        }
+
+    # 세 조회가 모두 정상적으로 끝났지만 어디에도 없다.
+    return {
+        "state": "NOT_FOUND",
+        "source": None,
+        "order_id": None,
+        "order_link_id": order_link_id,
+        "order_status": None,
+        "symbol": trading_symbol,
+        "side": None,
+        "qty": None,
+        "cum_exec_qty": None,
+        "avg_price": None,
+        "raw": None,
+        "errors": [],
+    }
+
+
+def update_surge_execution_from_reconcile(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    reconcile_result,
+):
+    """
+    Bybit reconcile 결과를 surge_executions에 반영한다.
+
+    중요:
+    - ACCEPTED / FILLED / TERMINAL_FAILED만 확정 상태로 반영
+    - NOT_FOUND / UNKNOWN은 CLAIMED를 유지
+    - 따라서 일시적인 API 지연/오류 때문에 재주문되지 않는다.
+    """
+    init_surge_execution_db()
+
+    user_id = int(user_id)
+    chat_id = int(chat_id or 0)
+    message_id = int(message_id)
+
+    result = dict(reconcile_result or {})
+
+    state = str(
+        result.get("state") or "UNKNOWN"
+    ).upper()
+
+    if state not in {
+        "ACCEPTED",
+        "FILLED",
+        "TERMINAL_FAILED",
+        "NOT_FOUND",
+        "UNKNOWN",
+    }:
+        raise ValueError(
+            f"Invalid reconcile state: {state}"
+        )
+
+    # NOT_FOUND와 UNKNOWN은 확정하지 않는다.
+    if state in {"NOT_FOUND", "UNKNOWN"}:
+        return {
+            "updated": False,
+            "status": "CLAIMED",
+            "reconcile_state": state,
+            "held": True,
+        }
+
+    if state == "TERMINAL_FAILED":
+        db_status = "FAILED"
+    else:
+        db_status = state
+
+    order_id = result.get("order_id")
+
+    qty = result.get("cum_exec_qty")
+
+    if qty in (None, ""):
+        qty = result.get("qty")
+
+    try:
+        qty = (
+            float(qty)
+            if qty not in (None, "")
+            else None
+        )
+    except Exception:
+        qty = None
+
+    error = None
+
+    if state == "TERMINAL_FAILED":
+        error = (
+            "Bybit terminal order status: "
+            f"{result.get('order_status')}"
+        )
+
+    with sqlite3.connect(SURGE_EXECUTION_DB) as con:
+        cur = con.execute("""
+            UPDATE surge_executions
+            SET
+                status=?,
+                order_id=COALESCE(?, order_id),
+                qty=COALESCE(?, qty),
+                error=?,
+                updated_at=CURRENT_TIMESTAMP
+            WHERE user_id=?
+              AND chat_id=?
+              AND message_id=?
+              AND status IN (
+                  'CLAIMED',
+                  'ACCEPTED'
+              )
+        """, (
+            db_status,
+            (
+                str(order_id)
+                if order_id not in (None, "")
+                else None
+            ),
+            qty,
+            error,
+            user_id,
+            chat_id,
+            message_id,
+        ))
+
+        con.commit()
+
+        updated = cur.rowcount == 1
+
+    return {
+        "updated": updated,
+        "status": db_status,
+        "reconcile_state": state,
+        "held": False,
+    }
+
+
+def reconcile_surge_execution(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+):
+    """
+    surge_executions의 CLAIMED/ACCEPTED 한 건을
+    orderLinkId로 Bybit와 대조하고 DB 상태를 갱신한다.
+
+    주문하지 않는다.
+    """
+    execution = get_surge_execution(
+        user_id,
+        chat_id,
+        message_id,
+    )
+
+    if execution is None:
+        return {
+            "found": False,
+            "updated": False,
+            "reason": "EXECUTION_NOT_FOUND",
+        }
+
+    order_link_id = execution.get(
+        "order_link_id"
+    )
+
+    symbol = execution.get("symbol")
+
+    result = reconcile_surge_order(
+        user_id,
+        order_link_id,
+        symbol,
+    )
+
+    update = update_surge_execution_from_reconcile(
+        user_id,
+        chat_id,
+        message_id,
+        result,
+    )
+
+    return {
+        "found": True,
+        "execution": execution,
+        "reconcile": result,
+        "update": update,
+    }
+
+
+# ============================================================
+# Surge market execution
+# ============================================================
+
+def execute_surge_market_order(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    symbol: str,
+    side: str,
+    *,
+    entry_percent: float | None = None,
+    dry_run: bool = True,
+):
+    """
+    멍꿀단 급등매매 Market 진입 실행기.
+
+    dry_run=True:
+      - execution claim 하지 않음
+      - 레버리지 변경하지 않음
+      - 주문하지 않음
+
+    dry_run=False:
+      - READ-ONLY preview
+      - execution CLAIM
+      - 레버리지 적용
+      - Available / 가격 / qty 최종 재계산
+      - 안정성 재검증
+      - Market 주문
+      - 즉시 reconcile
+
+    LONG:
+      Buy / positionIdx=1
+
+    SHORT:
+      Sell / positionIdx=2
+    """
+    from get_session import get_session
+
+    user_id = int(user_id)
+    chat_id = int(chat_id or 0)
+    message_id = int(message_id)
+
+    side = str(side).upper().strip()
+
+    if side == "LONG":
+        order_side = "Buy"
+        position_idx = 1
+
+    elif side == "SHORT":
+        order_side = "Sell"
+        position_idx = 2
+
+    else:
+        raise ValueError(
+            f"Invalid surge side: {side}"
+        )
+
+    # --------------------------------------------------------
+    # 1. READ-ONLY preview
+    # --------------------------------------------------------
+
+    preview = build_surge_execution_preview(
+        user_id,
+        symbol,
+        entry_percent=entry_percent,
+    )
+
+    if not preview.get("executable"):
+        return {
+            "ok": False,
+            "dry_run": bool(dry_run),
+            "executed": False,
+            "reason": "PREVIEW_NOT_EXECUTABLE",
+            "preview": preview,
+        }
+
+    final_plan = preview["final_plan"]
+
+    trading_symbol = final_plan[
+        "trading_symbol"
+    ]
+
+    order_link_id = surge_order_link_id(
+        user_id,
+        chat_id,
+        message_id,
+    )
+
+    # --------------------------------------------------------
+    # 2. DRY RUN
+    #
+    # DB / leverage / order 전부 무변경.
+    # 실제 주문에 사용될 final_plan을 함께 반환한다.
+    # --------------------------------------------------------
+
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "executed": False,
+            "reason": "DRY_RUN",
+
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+
+            "symbol": trading_symbol,
+            "side": side,
+            "order_side": order_side,
+            "position_idx": position_idx,
+
+            "order_link_id": order_link_id,
+
+            "preview": preview,
+            "final_plan": final_plan,
+        }
+
+    # --------------------------------------------------------
+    # 3. execution CLAIM
+    # --------------------------------------------------------
+
+    claim = claim_surge_execution(
+        user_id,
+        chat_id,
+        message_id,
+        trading_symbol,
+        side,
+        signal_stage=final_plan.get(
+            "signal_stage"
+        ),
+        entry_percent=final_plan.get(
+            "entry_percent"
+        ),
+    )
+
+    if not claim["claimed"]:
+        existing = get_surge_execution(
+            user_id,
+            chat_id,
+            message_id,
+        )
+
+        return {
+            "ok": False,
+            "dry_run": False,
+            "executed": False,
+            "reason": "ALREADY_CLAIMED",
+            "claim": claim,
+            "existing_execution": existing,
+        }
+
+    # --------------------------------------------------------
+    # 4. 실제 레버리지 적용 + 최종 재계산
+    #
+    # prepare_surge_order_final(apply_leverage=True)가
+    # 레버리지 변경 후 Available/Position/Price/qty를
+    # 다시 계산한다.
+    # --------------------------------------------------------
+
+    try:
+        prepared = prepare_surge_order_final(
+            user_id,
+            trading_symbol,
+            entry_percent=entry_percent,
+            apply_leverage=True,
+        )
+
+    except Exception as exc:
+        fail_surge_execution(
+            user_id,
+            chat_id,
+            message_id,
+            (
+                "FINAL_PREPARE_FAILED: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        )
+
+        return {
+            "ok": False,
+            "dry_run": False,
+            "executed": False,
+            "reason": "FINAL_PREPARE_FAILED",
+            "error":
+                f"{type(exc).__name__}: {exc}",
+            "claim": claim,
+        }
+
+    final_plan = prepared["final_plan"]
+
+    stability = validate_surge_leverage_stability(
+        prepared["initial_plan"],
+        final_plan,
+    )
+
+    executable = (
+        bool(final_plan["valid"])
+        and bool(stability["stable"])
+        and float(final_plan["qty"]) > 0
+    )
+
+    if not executable:
+        fail_surge_execution(
+            user_id,
+            chat_id,
+            message_id,
+            (
+                "FINAL_PLAN_NOT_EXECUTABLE: "
+                f"{stability.get('reason')}"
+            ),
+        )
+
+        return {
+            "ok": False,
+            "dry_run": False,
+            "executed": False,
+            "reason": "FINAL_PLAN_NOT_EXECUTABLE",
+            "claim": claim,
+            "prepared": prepared,
+            "stability": stability,
+        }
+
+    qty = float(final_plan["qty"])
+
+    # --------------------------------------------------------
+    # 5. Bybit session
+    # --------------------------------------------------------
+
+    session = get_session(user_id)
+
+    if session is None:
+        fail_surge_execution(
+            user_id,
+            chat_id,
+            message_id,
+            "BYBIT_SESSION_NOT_FOUND",
+        )
+
+        return {
+            "ok": False,
+            "dry_run": False,
+            "executed": False,
+            "reason": "BYBIT_SESSION_NOT_FOUND",
+        }
+
+    payload = {
+        "category": "linear",
+        "symbol": trading_symbol,
+        "side": order_side,
+        "orderType": "Market",
+        "qty": str(qty),
+        "positionIdx": position_idx,
+        "reduceOnly": False,
+        "orderLinkId": order_link_id,
+    }
+
+    # --------------------------------------------------------
+    # 6. Market 주문
+    # --------------------------------------------------------
+
+    try:
+        response = session.place_order(
+            **payload
+        )
+
+    except Exception as exc:
+        # 네트워크/timeout 예외는 주문 미접수라고 단정할 수 없다.
+        # FAILED 처리하지 않고 CLAIMED를 유지한 채 reconcile.
+        reconcile = reconcile_surge_execution(
+            user_id,
+            chat_id,
+            message_id,
+        )
+
+        return {
+            "ok": False,
+            "dry_run": False,
+            "executed": True,
+            "reason": "ORDER_EXCEPTION_RECONCILE",
+            "error":
+                f"{type(exc).__name__}: {exc}",
+            "claim": claim,
+            "prepared": prepared,
+            "stability": stability,
+            "payload": payload,
+            "reconcile": reconcile,
+        }
+
+    # --------------------------------------------------------
+    # 7. Bybit retCode 검증
+    #
+    # HTTP 호출 자체가 성공해도 retCode != 0이면
+    # 거래소가 주문을 거절한 것.
+    # ACCEPTED로 기록하면 안 된다.
+    # --------------------------------------------------------
+
+    if not isinstance(response, dict):
+        # 응답 형태를 판정할 수 없으므로
+        # 주문 접수 여부도 단정하지 않는다.
+        reconcile = reconcile_surge_execution(
+            user_id,
+            chat_id,
+            message_id,
+        )
+
+        return {
+            "ok": False,
+            "dry_run": False,
+            "executed": True,
+            "reason": "INVALID_ORDER_RESPONSE_RECONCILE",
+            "claim": claim,
+            "prepared": prepared,
+            "stability": stability,
+            "payload": payload,
+            "response": response,
+            "reconcile": reconcile,
+        }
+
+    ret_code = response.get("retCode")
+
+    try:
+        ret_code_int = int(ret_code)
+    except (TypeError, ValueError):
+        ret_code_int = None
+
+    if ret_code_int != 0:
+        ret_msg = str(
+            response.get("retMsg") or ""
+        )
+
+        fail_surge_execution(
+            user_id,
+            chat_id,
+            message_id,
+            (
+                "BYBIT_REJECTED: "
+                f"retCode={ret_code!r} "
+                f"retMsg={ret_msg}"
+            ),
+        )
+
+        return {
+            "ok": False,
+            "dry_run": False,
+            "executed": False,
+            "reason": "BYBIT_REJECTED",
+            "ret_code": ret_code,
+            "ret_msg": ret_msg,
+            "claim": claim,
+            "prepared": prepared,
+            "stability": stability,
+            "payload": payload,
+            "response": response,
+        }
+
+    # --------------------------------------------------------
+    # 8. 정상 접수 응답
+    # --------------------------------------------------------
+
+    result = response.get("result") or {}
+
+    order_id = result.get("orderId")
+
+    # 정상 retCode인데 orderId가 없다면
+    # ACCEPTED 확정하지 않고 reconcile한다.
+    if not order_id:
+        reconcile = reconcile_surge_execution(
+            user_id,
+            chat_id,
+            message_id,
+        )
+
+        return {
+            "ok": False,
+            "dry_run": False,
+            "executed": True,
+            "reason": "ORDER_ID_MISSING_RECONCILE",
+            "claim": claim,
+            "prepared": prepared,
+            "stability": stability,
+            "payload": payload,
+            "response": response,
+            "reconcile": reconcile,
+        }
+
+    complete_surge_execution(
+        user_id,
+        chat_id,
+        message_id,
+        order_id=order_id,
+        qty=qty,
+        notional=final_plan.get(
+            "final_notional"
+        ),
+        leverage=final_plan.get(
+            "selected_leverage"
+        ),
+        risk_id=final_plan.get(
+            "selected_risk_id"
+        ),
+        risk_limit=final_plan.get(
+            "selected_risk_limit"
+        ),
+    )
+
+    # --------------------------------------------------------
+    # 9. 즉시 reconcile
+    # --------------------------------------------------------
+
+    reconcile = reconcile_surge_execution(
+        user_id,
+        chat_id,
+        message_id,
+    )
+
+    return {
+        "ok": True,
+        "dry_run": False,
+        "executed": True,
+        "reason": "ORDER_SUBMITTED",
+        "claim": claim,
+        "prepared": prepared,
+        "stability": stability,
+        "final_plan": final_plan,
+        "payload": payload,
+        "response": response,
+        "reconcile": reconcile,
+    }
