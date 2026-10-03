@@ -3771,6 +3771,7 @@ def execute_surge_market_order(
             "dry_run": False,
             "executed": False,
             "reason": "ALREADY_CLAIMED",
+            "order_link_id": order_link_id,
             "claim": claim,
             "existing_execution": existing,
         }
@@ -4044,6 +4045,7 @@ def execute_surge_market_order(
         "dry_run": False,
         "executed": True,
         "reason": "ORDER_SUBMITTED",
+        "order_link_id": order_link_id,
         "claim": claim,
         "prepared": prepared,
         "stability": stability,
