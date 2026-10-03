@@ -5,6 +5,8 @@ import re
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 
+from surge_trading import execute_surge_market_order
+
 
 load_dotenv(".env")
 
@@ -67,6 +69,116 @@ async def main():
             print()
             print("[OI SIGNAL]")
             print("symbol =", symbol)
+
+            # ------------------------------------------------
+            # Surge executor E2E DRY RUN
+            #
+            # 실제 주문 없음
+            # 레버리지 변경 없음
+            # execution claim 없음
+            #
+            # 현재 Oi 급등종목 전략은 LONG 경로만 검증한다.
+            # 실거래 전환은 별도 검증 후 한다.
+            # ------------------------------------------------
+
+            try:
+                result = execute_surge_market_order(
+                    user_id=2,
+                    chat_id=CHAT_ID,
+                    message_id=int(event.id),
+                    symbol=symbol,
+                    side="LONG",
+                    dry_run=True,
+                )
+
+                print()
+                print("[SURGE DRY RUN]")
+                print(
+                    "message_id =",
+                    event.id,
+                )
+                print(
+                    "symbol     =",
+                    result.get("symbol"),
+                )
+                print(
+                    "side       =",
+                    result.get("side"),
+                )
+                print(
+                    "order_side =",
+                    result.get("order_side"),
+                )
+                print(
+                    "position   =",
+                    result.get("position_idx"),
+                )
+                print(
+                    "reason     =",
+                    result.get("reason"),
+                )
+                print(
+                    "executable =",
+                    (
+                        result
+                        .get("preview", {})
+                        .get("executable")
+                    ),
+                )
+
+                final_plan = (
+                    result
+                    .get("preview", {})
+                    .get("final_plan", {})
+                )
+
+                print(
+                    "stage      =",
+                    final_plan.get(
+                        "signal_stage"
+                    ),
+                )
+                print(
+                    "percent    =",
+                    final_plan.get(
+                        "entry_percent"
+                    ),
+                )
+                print(
+                    "risk id    =",
+                    final_plan.get(
+                        "selected_risk_id"
+                    ),
+                )
+                print(
+                    "risk limit =",
+                    final_plan.get(
+                        "selected_risk_limit"
+                    ),
+                )
+                print(
+                    "leverage   =",
+                    final_plan.get(
+                        "selected_leverage"
+                    ),
+                )
+                print(
+                    "qty        =",
+                    final_plan.get("qty"),
+                )
+                print(
+                    "notional   =",
+                    final_plan.get(
+                        "final_notional"
+                    ),
+                )
+
+            except Exception as exc:
+                print()
+                print(
+                    "[SURGE DRY RUN ERROR]",
+                    repr(exc),
+                )
 
         print("=" * 80, flush=True)
 
