@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>로그인 | Closed PNL</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body class="login-body">
+
+<main class="login-card">
+    <div class="brand">Closed PNL</div>
+    <p class="subtext">계정에 로그인하세요.</p>
+
+    {% if error %}
+    <div class="error-message">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/login">
+        <label>
+            아이디
+            <input
+                type="text"
+                name="username"
+                autocomplete="username"
+                required
+                autofocus
+            >
+        </label>
+
+        <label>
+            비밀번호
+            <input
+                type="password"
+                name="password"
+                autocomplete="current-password"
+                required
+            >
+        </label>
+
+        <button type="submit">
+            로그인
+        </button>
+    </form>
+</main>
+
+</body>
+</html>

@@ -1,0 +1,202 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #f5f6f8;
+    color: #17191c;
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+.login-body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 390px;
+    padding: 34px;
+    background: white;
+    border: 1px solid #e2e5e9;
+    border-radius: 14px;
+}
+
+.brand {
+    font-size: 25px;
+    font-weight: 750;
+}
+
+.subtext,
+.username {
+    margin-top: 5px;
+    color: #70757d;
+}
+
+.login-card form {
+    margin-top: 28px;
+}
+
+label {
+    display: block;
+    margin-top: 17px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+input {
+    width: 100%;
+    margin-top: 7px;
+    padding: 12px 13px;
+    border: 1px solid #d5d9df;
+    border-radius: 8px;
+    background: white;
+    outline: none;
+}
+
+input:focus {
+    border-color: #707780;
+}
+
+button {
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.login-card button,
+.seed-form button {
+    width: 100%;
+    margin-top: 22px;
+    padding: 12px;
+    background: #17191c;
+    color: white;
+    font-weight: 650;
+}
+
+.topbar {
+    min-height: 76px;
+    padding: 14px max(22px, calc((100% - 1000px) / 2));
+    background: white;
+    border-bottom: 1px solid #e2e5e9;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.logout-button {
+    padding: 9px 14px;
+    background: #eef0f2;
+}
+
+.container {
+    max-width: 1000px;
+    margin: 36px auto;
+    padding: 0 22px;
+}
+
+.section-title {
+    margin-bottom: 16px;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.wallet-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.wallet-card,
+.settings-card {
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: 12px;
+}
+
+.wallet-card {
+    padding: 20px;
+}
+
+.wallet-card span {
+    display: block;
+    color: #747981;
+    font-size: 13px;
+}
+
+.wallet-card strong {
+    display: block;
+    margin-top: 9px;
+    overflow-wrap: anywhere;
+    font-size: 20px;
+}
+
+.wallet-card small {
+    color: #8a8f96;
+}
+
+.settings-card {
+    max-width: 480px;
+    margin-top: 30px;
+    padding: 22px;
+}
+
+.percent-input {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.percent-input input {
+    flex: 1;
+}
+
+.percent-input span {
+    margin-top: 7px;
+    font-weight: 700;
+}
+
+.error-message,
+.success-message {
+    margin: 16px 0;
+    padding: 11px 13px;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.error-message {
+    background: #f4e8e8;
+}
+
+.success-message {
+    background: #e9f2e9;
+}
+
+@media (max-width: 750px) {
+    .wallet-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 430px) {
+    .wallet-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .login-card {
+        padding: 26px 22px;
+    }
+}

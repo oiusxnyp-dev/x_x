@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Closed PNL</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+<header class="topbar">
+    <div>
+        <div class="brand">Closed PNL</div>
+        <div class="username">
+            {{ user["username"] }}
+        </div>
+    </div>
+
+    <form method="post" action="/logout">
+        <button class="logout-button" type="submit">
+            로그아웃
+        </button>
+    </form>
+</header>
+
+<main class="container">
+
+    <section>
+        <div class="section-title">
+            Bybit Wallet
+        </div>
+
+        {% if wallet_error %}
+
+        <div class="error-message">
+            Wallet 조회 실패: {{ wallet_error }}
+        </div>
+
+        {% else %}
+
+        <div class="wallet-grid">
+
+            <div class="wallet-card">
+                <span>Equity</span>
+                <strong>{{ wallet["equity"] }}</strong>
+                <small>USDT</small>
+            </div>
+
+            <div class="wallet-card">
+                <span>Wallet</span>
+                <strong>{{ wallet["wallet"] }}</strong>
+                <small>USDT</small>
+            </div>
+
+            <div class="wallet-card">
+                <span>Available</span>
+                <strong>{{ wallet["available"] }}</strong>
+                <small>USDT</small>
+            </div>
+
+            <div class="wallet-card">
+                <span>Unrealised PnL</span>
+                <strong>{{ wallet["unrealised"] }}</strong>
+                <small>USDT</small>
+            </div>
+
+        </div>
+
+        {% endif %}
+    </section>
+
+
+    <section class="settings-card">
+
+        <div class="section-title">
+            매매 설정
+        </div>
+
+        {% if saved %}
+        <div class="success-message">
+            비중을 저장했습니다.
+        </div>
+        {% endif %}
+
+        <form
+            method="post"
+            action="/settings/seed"
+            class="seed-form"
+        >
+            <label for="seed_percent">
+                진입 비중
+            </label>
+
+            <div class="percent-input">
+                <input
+                    id="seed_percent"
+                    name="seed_percent"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value="{{ seed_percent }}"
+                    required
+                >
+                <span>%</span>
+            </div>
+
+            <button type="submit">
+                저장
+            </button>
+        </form>
+
+    </section>
+
+</main>
+
+</body>
+</html>
