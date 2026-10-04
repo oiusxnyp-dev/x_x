@@ -129,7 +129,7 @@ async def main():
                     message_id=int(event.id),
                     symbol=symbol,
                     side="LONG",
-                    dry_run=True,
+                    dry_run=False,
                 )
 
                 print()
