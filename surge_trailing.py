@@ -1,0 +1,494 @@
+import time
+from dataclasses import dataclass
+
+import redis
+
+from get_session import get_session
+
+
+USER_ID = 2
+
+# +0.5% 도달 시 trailing 활성화
+TRAIL_ARM_PERCENT = 0.005
+
+# 활성화 후 최고가 대비 -0.5%
+TRAIL_GAP_PERCENT = 0.005
+
+POLL_SECONDS = 0.25
+
+
+@dataclass
+class TrailState:
+    symbol: str
+    entry_price: float
+    high_price: float
+    armed: bool = False
+    closing: bool = False
+
+
+class SurgeTrailingManager:
+    def __init__(self, user_id=USER_ID):
+        self.user_id = int(user_id)
+
+        self.redis = redis.Redis(
+            host="127.0.0.1",
+            port=6379,
+            decode_responses=True,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+        )
+
+        self.states = {}
+
+        # Redis에서 마지막으로 소비한 급등 진입 reset event.
+        self.last_reset_event = None
+
+    def get_price(self, symbol):
+        row = self.redis.hgetall(
+            f"market:{symbol}"
+        )
+
+        if not row:
+            return None
+
+        try:
+            updated_at = float(
+                row.get("updated_at") or 0
+            )
+        except (TypeError, ValueError):
+            return None
+
+        if updated_at <= 0:
+            return None
+
+        age = max(
+            0.0,
+            time.time() - updated_at,
+        )
+
+        # 오래된 가격으로 청산 판단 금지
+        if age > 5.0:
+            return None
+
+        raw = (
+            row.get("markPrice")
+            or row.get("lastPrice")
+        )
+
+        try:
+            price = float(raw or 0)
+        except (TypeError, ValueError):
+            return None
+
+        if price <= 0:
+            return None
+
+        return price
+
+    def consume_reset_event(self):
+        """
+        surge_trading.py가 실제 급등 주문 접수 후 발행한
+        Redis trailing reset event를 소비한다.
+        """
+
+        key = (
+            f"surge:trail:reset:{self.user_id}"
+        )
+
+        try:
+            value = self.redis.get(key)
+        except redis.RedisError as exc:
+            print(
+                "[SURGE TRAIL RESET READ ERROR]",
+                repr(exc),
+                flush=True,
+            )
+            return
+
+        if not value:
+            return
+
+        if value == self.last_reset_event:
+            return
+
+        try:
+            symbol, event_time = (
+                value.rsplit(":", 1)
+            )
+
+            symbol = (
+                str(symbol)
+                .upper()
+                .strip()
+            )
+
+            float(event_time)
+
+        except Exception:
+            print(
+                "[SURGE TRAIL RESET INVALID]",
+                repr(value),
+                flush=True,
+            )
+
+            self.last_reset_event = value
+            return
+
+        self.reset_symbol(symbol)
+
+        self.last_reset_event = value
+
+        print(
+            "[SURGE TRAIL RESET CONSUMED]",
+            f"user_id={self.user_id}",
+            f"symbol={symbol}",
+            f"event={value}",
+            flush=True,
+        )
+
+    def reset_symbol(self, symbol):
+        """
+        새 급등 신호가 실제 주문에 사용될 때
+        해당 심볼의 이전 trailing cycle을 초기화한다.
+        """
+        symbol = str(symbol).upper().strip()
+
+        old_state = self.states.pop(
+            symbol,
+            None,
+        )
+
+        print(
+            "[SURGE TRAIL RESET]",
+            f"symbol={symbol}",
+            f"had_state={old_state is not None}",
+            flush=True,
+        )
+
+    def get_long_positions(self):
+        session = get_session(
+            self.user_id
+        )
+
+        if session is None:
+            raise RuntimeError(
+                "Bybit session not found"
+            )
+
+        result = session.get_positions(
+            category="linear",
+            settleCoin="USDT",
+        )
+
+        rows = (
+            result
+            .get("result", {})
+            .get("list", [])
+        )
+
+        positions = {}
+
+        for row in rows:
+            try:
+                size = float(
+                    row.get("size") or 0
+                )
+
+                position_idx = int(
+                    row.get("positionIdx") or 0
+                )
+
+                avg_price = float(
+                    row.get("avgPrice") or 0
+                )
+            except (TypeError, ValueError):
+                continue
+
+            if position_idx != 1:
+                continue
+
+            if size <= 0:
+                continue
+
+            if avg_price <= 0:
+                continue
+
+            symbol = str(
+                row.get("symbol") or ""
+            ).upper()
+
+            if not symbol:
+                continue
+
+            positions[symbol] = {
+                "symbol": symbol,
+                "size": size,
+                "avg_price": avg_price,
+            }
+
+        return positions
+
+    def close_long(
+        self,
+        symbol,
+        size,
+    ):
+        session = get_session(
+            self.user_id
+        )
+
+        if session is None:
+            raise RuntimeError(
+                "Bybit session not found"
+            )
+
+        payload = {
+            "category": "linear",
+            "symbol": symbol,
+            "side": "Sell",
+            "orderType": "Market",
+            "qty": str(size),
+            "positionIdx": 1,
+            "reduceOnly": True,
+        }
+
+        print(
+            "[SURGE TRAIL CLOSE]",
+            payload,
+            flush=True,
+        )
+
+        response = session.place_order(
+            **payload
+        )
+
+        if not isinstance(response, dict):
+            raise RuntimeError(
+                "Invalid close response"
+            )
+
+        ret_code = response.get(
+            "retCode"
+        )
+
+        try:
+            ret_code = int(ret_code)
+        except (TypeError, ValueError):
+            ret_code = None
+
+        if ret_code != 0:
+            raise RuntimeError(
+                "Trailing close rejected: "
+                f"{response}"
+            )
+
+        return response
+
+    def update_position(
+        self,
+        position,
+    ):
+        symbol = position["symbol"]
+        size = position["size"]
+        entry = position["avg_price"]
+
+        price = self.get_price(
+            symbol
+        )
+
+        if price is None:
+            return
+
+        state = self.states.get(
+            symbol
+        )
+
+        if state is None:
+            state = TrailState(
+                symbol=symbol,
+                entry_price=entry,
+                high_price=price,
+            )
+
+            self.states[symbol] = state
+
+            print(
+                "[SURGE TRAIL TRACK]",
+                f"symbol={symbol}",
+                f"entry={entry}",
+                f"price={price}",
+                flush=True,
+            )
+
+        # Bybit의 실제 avgPrice가 바뀌면
+        # 추가진입으로 간주하여 기준 진입가 갱신.
+        if abs(
+            state.entry_price - entry
+        ) > 1e-12:
+            print(
+                "[SURGE TRAIL ENTRY UPDATE]",
+                f"symbol={symbol}",
+                f"old={state.entry_price}",
+                f"new={entry}",
+                flush=True,
+            )
+
+            state.entry_price = entry
+
+            # 아직 ARM 전이라면 현재가부터 다시 추적.
+            if not state.armed:
+                state.high_price = price
+
+        arm_price = (
+            state.entry_price
+            * (1.0 + TRAIL_ARM_PERCENT)
+        )
+
+        if not state.armed:
+            if price >= arm_price:
+                state.armed = True
+                state.high_price = price
+
+                print(
+                    "[SURGE TRAIL ARMED]",
+                    f"symbol={symbol}",
+                    f"entry={state.entry_price}",
+                    f"price={price}",
+                    f"arm={arm_price}",
+                    flush=True,
+                )
+            else:
+                return
+
+        if price > state.high_price:
+            state.high_price = price
+
+            print(
+                "[SURGE TRAIL HIGH]",
+                f"symbol={symbol}",
+                f"high={state.high_price}",
+                flush=True,
+            )
+
+        trigger_price = (
+            state.high_price
+            * (1.0 - TRAIL_GAP_PERCENT)
+        )
+
+        if (
+            price <= trigger_price
+            and not state.closing
+        ):
+            state.closing = True
+
+            print(
+                "[SURGE TRAIL TRIGGER]",
+                f"symbol={symbol}",
+                f"entry={state.entry_price}",
+                f"high={state.high_price}",
+                f"price={price}",
+                f"trigger={trigger_price}",
+                f"size={size}",
+                flush=True,
+            )
+
+            try:
+                response = self.close_long(
+                    symbol,
+                    size,
+                )
+
+                print(
+                    "[SURGE TRAIL CLOSED]",
+                    f"symbol={symbol}",
+                    f"response={response}",
+                    flush=True,
+                )
+
+            except Exception:
+                # 실패하면 다음 루프에서 재시도 가능.
+                state.closing = False
+                raise
+
+    def run(self):
+        print(
+            "=" * 80,
+            flush=True,
+        )
+        print(
+            "SURGE TRAILING STARTED",
+            flush=True,
+        )
+        print(
+            f"USER_ID = {self.user_id}",
+            flush=True,
+        )
+        print(
+            "ARM     = +0.5%",
+            flush=True,
+        )
+        print(
+            "TRAIL   = HIGH -0.5%",
+            flush=True,
+        )
+        print(
+            "=" * 80,
+            flush=True,
+        )
+
+        while True:
+            try:
+                # 새 급등 진입이 있었다면 기존 trailing state를
+                # 먼저 제거한다. 이후 get_long_positions()에서
+                # 실제 Bybit avgPrice를 읽어 새 cycle을 시작한다.
+                self.consume_reset_event()
+
+                positions = (
+                    self.get_long_positions()
+                )
+
+                # 종료된 포지션 state 제거
+                for symbol in list(
+                    self.states
+                ):
+                    if symbol not in positions:
+                        print(
+                            "[SURGE TRAIL REMOVE]",
+                            symbol,
+                            flush=True,
+                        )
+
+                        self.states.pop(
+                            symbol,
+                            None,
+                        )
+
+                for position in (
+                    positions.values()
+                ):
+                    try:
+                        self.update_position(
+                            position
+                        )
+                    except Exception as exc:
+                        print(
+                            "[SURGE TRAIL POSITION ERROR]",
+                            position["symbol"],
+                            repr(exc),
+                            flush=True,
+                        )
+
+            except Exception as exc:
+                print(
+                    "[SURGE TRAIL LOOP ERROR]",
+                    repr(exc),
+                    flush=True,
+                )
+
+            time.sleep(
+                POLL_SECONDS
+            )
+
+
+if __name__ == "__main__":
+    SurgeTrailingManager().run()

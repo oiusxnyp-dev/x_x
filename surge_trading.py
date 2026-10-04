@@ -4382,6 +4382,60 @@ def execute_surge_market_order(
     )
 
     # --------------------------------------------------------
+    # 새 급등 진입 -> trailing cycle reset
+    #
+    # 주문이 Bybit에 정상 접수되고 orderId까지 확보된 뒤에만
+    # reset event를 발행한다.
+    #
+    # trailing manager는 이 값을 소비하여 기존 symbol state를
+    # 삭제하고 이후 실제 Bybit avgPrice 기준으로 새 cycle을 만든다.
+    # --------------------------------------------------------
+
+    try:
+        import redis
+
+        redis_client = redis.Redis(
+            host="127.0.0.1",
+            port=6379,
+            decode_responses=True,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+        )
+
+        reset_key = (
+            f"surge:trail:reset:{user_id}"
+        )
+
+        reset_value = (
+            f"{trading_symbol}:"
+            f"{time.time()}"
+        )
+
+        redis_client.set(
+            reset_key,
+            reset_value,
+        )
+
+        print(
+            "[SURGE TRAIL RESET PUBLISH]",
+            f"user_id={user_id}",
+            f"symbol={trading_symbol}",
+            f"order_id={order_id}",
+            flush=True,
+        )
+
+    except Exception as exc:
+        # trailing reset 실패가 이미 접수된 주문 자체를
+        # 실패 처리하게 만들면 안 된다.
+        print(
+            "[SURGE TRAIL RESET PUBLISH ERROR]",
+            f"user_id={user_id}",
+            f"symbol={trading_symbol}",
+            repr(exc),
+            flush=True,
+        )
+
+    # --------------------------------------------------------
     # 9. 즉시 reconcile
     # --------------------------------------------------------
 
