@@ -905,3 +905,139 @@
         start();
     }
 })();
+/* ============================================================
+ * Recent surge Telegram messages
+ * ============================================================ */
+(() => {
+    const container =
+        document.getElementById(
+            "surge-recent-messages"
+        );
+
+    if (!container) {
+        return;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+    function formatTime(value) {
+        if (!value) {
+            return "-";
+        }
+
+        const date = new Date(value);
+
+        if (Number.isNaN(date.getTime())) {
+            return value;
+        }
+
+        return date.toLocaleString(
+            "ko-KR",
+            {
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+            }
+        );
+    }
+
+    function render(messages) {
+        if (
+            !Array.isArray(messages) ||
+            messages.length === 0
+        ) {
+            container.innerHTML = `
+                <div class="surge-recent-empty">
+                    표시할 급등 메시지가 없습니다.
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML =
+            messages.map((row) => {
+                const symbol =
+                    escapeHtml(row.symbol || "-");
+
+                const stage =
+                    Number(row.signal_stage || 0);
+
+                const time =
+                    escapeHtml(
+                        formatTime(
+                            row.message_time_iso
+                        )
+                    );
+
+                const body =
+                    escapeHtml(row.text || "");
+
+                return `
+                    <article class="surge-recent-item">
+                        <div class="surge-recent-meta">
+                            <strong
+                                class="surge-recent-symbol"
+                            >
+                                #${symbol}
+                            </strong>
+
+                            <span>
+                                ${stage}차
+                            </span>
+
+                            <span>
+                                ${time}
+                            </span>
+                        </div>
+
+                        <div class="surge-recent-text">${body}</div>
+                    </article>
+                `;
+            }).join("");
+    }
+
+    async function loadRecentSurgeMessages() {
+        try {
+            const response = await fetch(
+                "/api/surge/recent-messages",
+                {
+                    cache: "no-store",
+                }
+            );
+
+            const data = await response.json();
+
+            if (!data.ok) {
+                throw new Error(
+                    data.error ||
+                    "recent message load failed"
+                );
+            }
+
+            render(data.messages || []);
+
+        } catch (error) {
+            console.error(
+                "Recent surge messages:",
+                error
+            );
+
+            container.innerHTML = `
+                <div class="surge-recent-empty">
+                    최근 메시지를 불러오지 못했습니다.
+                </div>
+            `;
+        }
+    }
+
+    loadRecentSurgeMessages();
+})();

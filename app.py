@@ -25,6 +25,7 @@ from surge_trading import (
     get_surge_symbol_entry_plan,
     save_symbol_entry_percent,
     save_surge_auto_trading,
+    get_all_surge_signals,
 )
 
 
@@ -188,6 +189,57 @@ async def dashboard(request: Request):
             "wallet_error": wallet_error,
         },
     )
+
+
+@app.get("/api/surge/recent-messages")
+async def surge_recent_messages_api(
+    request: Request,
+):
+    user = current_user(request)
+
+    if not user:
+        return {
+            "ok": False,
+            "error": "not_authenticated",
+            "messages": [],
+        }
+
+    try:
+        signals = await asyncio.to_thread(
+            get_all_surge_signals
+        )
+
+        recent = list(
+            reversed(signals[-2:])
+        )
+
+        return {
+            "ok": True,
+            "messages": [
+                {
+                    "message_id":
+                        row.get("message_id"),
+                    "symbol":
+                        row.get("symbol"),
+                    "signal_stage":
+                        row.get("signal_stage"),
+                    "message_time_iso":
+                        row.get("message_time_iso"),
+                    "edit_time_iso":
+                        row.get("edit_time_iso"),
+                    "text":
+                        row.get("text") or "",
+                }
+                for row in recent
+            ],
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "messages": [],
+        }
 
 
 @app.get("/api/surge/settings")

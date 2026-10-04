@@ -1961,3 +1961,114 @@ input:focus {
 
     text-shadow: none;
 }
+/* ============================================================
+   RECENT SURGE MESSAGES
+   ============================================================ */
+
+.surge-recent-card {
+    margin-bottom: 18px;
+
+    border: 1px solid #292b26;
+    border-radius: 14px;
+
+    background:
+        linear-gradient(
+            180deg,
+            #111411,
+            #0e100e
+        );
+
+    overflow: hidden;
+}
+
+.surge-recent-header {
+    padding: 18px 24px 15px;
+
+    border-bottom: 1px solid #292b26;
+}
+
+.surge-recent-messages {
+    display: grid;
+
+    grid-template-columns:
+        repeat(2, minmax(0, 1fr));
+
+    gap: 12px;
+
+    padding: 16px 24px 20px;
+}
+
+.surge-recent-item {
+    min-width: 0;
+
+    padding: 15px 17px;
+
+    border: 1px solid #303229;
+    border-radius: 10px;
+
+    background:
+        linear-gradient(
+            180deg,
+            #12140f,
+            #0f110e
+        );
+}
+
+.surge-recent-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+
+    gap: 10px;
+
+    margin-bottom: 10px;
+
+    color: #9e9d88;
+
+    font-size: 11px;
+}
+
+.surge-recent-symbol {
+    color: #efd783;
+
+    font-size: 14px;
+    font-weight: 750;
+}
+
+.surge-recent-text {
+    color: #d4d3c8;
+
+    font-size: 12px;
+    line-height: 1.6;
+
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+
+    max-height: 150px;
+    overflow: auto;
+}
+
+.surge-recent-empty {
+    grid-column: 1 / -1;
+
+    padding: 22px;
+
+    color: #8f9086;
+
+    text-align: center;
+    font-size: 12px;
+}
+
+@media (max-width: 800px) {
+    .surge-recent-messages {
+        grid-template-columns: 1fr;
+
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+
+    .surge-recent-header {
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+}
