@@ -113,6 +113,23 @@
                     최근 감지된 급등종목 메시지 2개
                 </div>
             </div>
+
+            <button
+                id="surge-settings-toggle"
+                class="surge-settings-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="surge-settings-panel"
+            >
+                <span class="surge-settings-toggle-label">
+                    설정
+                </span>
+                <span
+                    id="surge-settings-toggle-icon"
+                    class="surge-settings-toggle-icon"
+                    aria-hidden="true"
+                >▼</span>
+            </button>
         </div>
 
         <div
@@ -125,7 +142,11 @@
         </div>
     </section>
 
-    <section class="surge-settings-card">
+    <section
+        id="surge-settings-panel"
+        class="surge-settings-card"
+        hidden
+    >
         <div class="surge-header">
             <div>
                 <div class="section-title">

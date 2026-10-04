@@ -204,6 +204,40 @@
 
 
 /* ============================================================
+ * Surge settings collapse / expand
+ * ============================================================ */
+(() => {
+    const toggle = document.getElementById(
+        "surge-settings-toggle"
+    );
+    const panel = document.getElementById(
+        "surge-settings-panel"
+    );
+    const icon = document.getElementById(
+        "surge-settings-toggle-icon"
+    );
+
+    if (!toggle || !panel) {
+        return;
+    }
+
+    toggle.addEventListener("click", () => {
+        const willOpen = panel.hidden;
+
+        panel.hidden = !willOpen;
+        toggle.setAttribute(
+            "aria-expanded",
+            willOpen ? "true" : "false"
+        );
+
+        if (icon) {
+            icon.textContent = willOpen ? "▲" : "▼";
+        }
+    });
+})();
+
+
+/* ============================================================
  * Surge trading settings UI
  * ============================================================ */
 (() => {
