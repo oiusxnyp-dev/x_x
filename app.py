@@ -15,6 +15,17 @@ from get_session import get_session
 from bybit_ws import ensure_bybit_realtime
 from realtime import realtime
 from user_db import authenticate_user, get_user_by_id
+from surge_trading import (
+    get_settings as get_surge_settings,
+    save_settings as save_surge_settings,
+    get_stage_settings,
+    save_stage_entry_setting,
+    get_surge_trailing_settings,
+    save_surge_trailing_settings,
+    get_surge_symbol_entry_plan,
+    save_symbol_entry_percent,
+    save_surge_auto_trading,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -242,6 +253,286 @@ async def save_seed(
         "/?saved=1",
         status_code=303,
     )
+
+
+
+@app.get("/api/surge/settings")
+async def surge_settings_api(request: Request):
+    user = current_user(request)
+
+    if not user:
+        return {
+            "ok": False,
+            "error": "not_authenticated",
+        }
+
+    user_id = int(user["id"])
+
+    try:
+        settings = get_surge_settings(user_id)
+        stages = get_stage_settings(user_id)
+        trailing = get_surge_trailing_settings(
+            user_id
+        )
+        symbols = get_surge_symbol_entry_plan(
+            user_id
+        )
+
+        return {
+            "ok": True,
+            "settings": settings,
+            "stages": stages,
+            "trailing": trailing,
+            "symbols": symbols,
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
+
+
+@app.post("/api/surge/global")
+async def surge_global_api(
+    request: Request,
+    entry_percent: float = Form(...),
+):
+    user = current_user(request)
+
+    if not user:
+        return {
+            "ok": False,
+            "error": "not_authenticated",
+        }
+
+    if entry_percent < 0 or entry_percent > 1000:
+        return {
+            "ok": False,
+            "error": "entry_percent must be 0..1000",
+        }
+
+    user_id = int(user["id"])
+
+    try:
+        current = get_surge_settings(user_id)
+
+        save_surge_settings(
+            user_id,
+            enabled=bool(current["enabled"]),
+            entry_percent=entry_percent,
+        )
+
+        return {
+            "ok": True,
+            "entry_percent": float(
+                entry_percent
+            ),
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
+
+
+@app.post("/api/surge/enabled")
+async def surge_enabled_api(
+    request: Request,
+    enabled: int = Form(...),
+):
+    user = current_user(request)
+
+    if not user:
+        return {
+            "ok": False,
+            "error": "not_authenticated",
+        }
+
+    if enabled not in (0, 1):
+        return {
+            "ok": False,
+            "error": "enabled must be 0 or 1",
+        }
+
+    user_id = int(user["id"])
+
+    try:
+        result = save_surge_auto_trading(
+            user_id,
+            bool(enabled),
+        )
+
+        if not result.get("ok"):
+            return {
+                "ok": False,
+                "error": (
+                    result.get("message")
+                    or result.get("reason")
+                    or "surge trading blocked"
+                ),
+                **result,
+            }
+
+        return result
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
+
+
+@app.post("/api/surge/stage")
+async def surge_stage_api(
+    request: Request,
+    stage: int = Form(...),
+    entry_percent: float = Form(...),
+    use_global: int = Form(0),
+):
+    user = current_user(request)
+
+    if not user:
+        return {
+            "ok": False,
+            "error": "not_authenticated",
+        }
+
+    if stage < 1:
+        return {
+            "ok": False,
+            "error": "stage must be >= 1",
+        }
+
+    if entry_percent < 0 or entry_percent > 1000:
+        return {
+            "ok": False,
+            "error": "entry_percent must be 0..1000",
+        }
+
+    if use_global not in (0, 1):
+        return {
+            "ok": False,
+            "error": "use_global must be 0 or 1",
+        }
+
+    user_id = int(user["id"])
+
+    try:
+        save_stage_entry_setting(
+            user_id,
+            stage,
+            entry_percent=entry_percent,
+            use_global=bool(use_global),
+        )
+
+        return {
+            "ok": True,
+            "stage": int(stage),
+            "entry_percent": float(
+                entry_percent
+            ),
+            "use_global": bool(
+                use_global
+            ),
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
+
+
+@app.post("/api/surge/symbol")
+async def surge_symbol_api(
+    request: Request,
+    symbol: str = Form(...),
+    entry_percent: str = Form(""),
+):
+    user = current_user(request)
+
+    if not user:
+        return {
+            "ok": False,
+            "error": "not_authenticated",
+        }
+
+    user_id = int(user["id"])
+    symbol = symbol.strip().upper()
+
+    if not symbol:
+        return {
+            "ok": False,
+            "error": "symbol required",
+        }
+
+    try:
+        if entry_percent.strip() == "":
+            value = None
+        else:
+            value = float(entry_percent)
+
+            if value < 0 or value > 1000:
+                return {
+                    "ok": False,
+                    "error":
+                        "entry_percent must be 0..1000",
+                }
+
+        saved = save_symbol_entry_percent(
+            user_id,
+            symbol,
+            value,
+        )
+
+        return {
+            "ok": True,
+            "symbol": symbol,
+            "entry_percent": saved,
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
+
+
+@app.post("/api/surge/trailing")
+async def surge_trailing_api(
+    request: Request,
+    arm_percent: float = Form(...),
+    gap_percent: float = Form(...),
+):
+    user = current_user(request)
+
+    if not user:
+        return {
+            "ok": False,
+            "error": "not_authenticated",
+        }
+
+    user_id = int(user["id"])
+
+    try:
+        saved = save_surge_trailing_settings(
+            user_id,
+            arm_percent,
+            gap_percent,
+        )
+
+        return {
+            "ok": True,
+            **saved,
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+        }
 
 
 @app.get("/api/wallet")

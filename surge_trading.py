@@ -1,4 +1,5 @@
 import sqlite3
+import time
 import re
 from pathlib import Path
 from collections import defaultdict
@@ -57,6 +58,298 @@ def get_settings(user_id: int):
         "enabled": bool(row["enabled"]),
         "entry_percent": float(row["entry_percent"]),
         "updated_at": row["updated_at"],
+    }
+
+
+# ============================================================
+# Surge web/user settings extension
+# ============================================================
+
+DEFAULT_SURGE_ARM_PERCENT = 0.5
+DEFAULT_SURGE_TRAIL_GAP_PERCENT = 0.5
+
+
+def init_surge_web_settings():
+    """
+    급등매매 사용자 웹 설정 확장.
+
+    - ARM / trailing gap
+    - 종목별 진입 비중 override
+
+    기존 surge_settings / stage 설정은 그대로 사용한다.
+    """
+    with sqlite3.connect(SETTINGS_DB) as con:
+        columns = {
+            row[1]
+            for row in con.execute(
+                "PRAGMA table_info(surge_settings)"
+            ).fetchall()
+        }
+
+        if "trail_arm_percent" not in columns:
+            con.execute("""
+                ALTER TABLE surge_settings
+                ADD COLUMN trail_arm_percent REAL
+                NOT NULL DEFAULT 0.5
+            """)
+
+        if "trail_gap_percent" not in columns:
+            con.execute("""
+                ALTER TABLE surge_settings
+                ADD COLUMN trail_gap_percent REAL
+                NOT NULL DEFAULT 0.5
+            """)
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS
+            surge_symbol_settings (
+                user_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                entry_percent REAL,
+                updated_at REAL NOT NULL,
+
+                PRIMARY KEY (
+                    user_id,
+                    symbol
+                )
+            )
+        """)
+
+        con.commit()
+
+
+def get_surge_trailing_settings(user_id):
+    init_surge_web_settings()
+
+    with sqlite3.connect(SETTINGS_DB) as con:
+        row = con.execute("""
+            SELECT
+                trail_arm_percent,
+                trail_gap_percent
+            FROM surge_settings
+            WHERE user_id=?
+        """, (
+            int(user_id),
+        )).fetchone()
+
+    if not row:
+        return {
+            "arm_percent":
+                DEFAULT_SURGE_ARM_PERCENT,
+            "gap_percent":
+                DEFAULT_SURGE_TRAIL_GAP_PERCENT,
+        }
+
+    arm = float(
+        row[0]
+        if row[0] is not None
+        else DEFAULT_SURGE_ARM_PERCENT
+    )
+
+    gap = float(
+        row[1]
+        if row[1] is not None
+        else DEFAULT_SURGE_TRAIL_GAP_PERCENT
+    )
+
+    return {
+        "arm_percent": arm,
+        "gap_percent": gap,
+    }
+
+
+def save_surge_trailing_settings(
+    user_id,
+    arm_percent,
+    gap_percent,
+):
+    init_surge_web_settings()
+
+    uid = int(user_id)
+    arm = float(arm_percent)
+    gap = float(gap_percent)
+
+    if arm < 0 or arm > 100:
+        raise ValueError(
+            "arm_percent must be 0..100"
+        )
+
+    if gap < 0 or gap > 100:
+        raise ValueError(
+            "gap_percent must be 0..100"
+        )
+
+    # 기존 row 생성/기본값 처리는 기존 설정 함수를 이용한다.
+    get_settings(uid)
+
+    with sqlite3.connect(SETTINGS_DB) as con:
+        con.execute("""
+            UPDATE surge_settings
+            SET
+                trail_arm_percent=?,
+                trail_gap_percent=?
+            WHERE user_id=?
+        """, (
+            arm,
+            gap,
+            uid,
+        ))
+
+        con.commit()
+
+    return get_surge_trailing_settings(uid)
+
+
+def get_symbol_entry_percent(
+    user_id,
+    symbol,
+):
+    init_surge_web_settings()
+
+    symbol = str(symbol).upper().strip()
+
+    if not symbol:
+        return None
+
+    with sqlite3.connect(SETTINGS_DB) as con:
+        row = con.execute("""
+            SELECT entry_percent
+            FROM surge_symbol_settings
+            WHERE user_id=?
+              AND symbol=?
+        """, (
+            int(user_id),
+            symbol,
+        )).fetchone()
+
+    if not row or row[0] is None:
+        return None
+
+    return float(row[0])
+
+
+def save_symbol_entry_percent(
+    user_id,
+    symbol,
+    entry_percent,
+):
+    init_surge_web_settings()
+
+    uid = int(user_id)
+    symbol = str(symbol).upper().strip()
+
+    if not symbol:
+        raise ValueError(
+            "symbol is required"
+        )
+
+    # None = override 삭제
+    if entry_percent is None:
+        with sqlite3.connect(SETTINGS_DB) as con:
+            con.execute("""
+                DELETE FROM surge_symbol_settings
+                WHERE user_id=?
+                  AND symbol=?
+            """, (
+                uid,
+                symbol,
+            ))
+
+            con.commit()
+
+        return None
+
+    value = float(entry_percent)
+
+    if value < 0 or value > 1000:
+        raise ValueError(
+            "entry_percent must be 0..1000"
+        )
+
+    now = time.time()
+
+    with sqlite3.connect(SETTINGS_DB) as con:
+        con.execute("""
+            INSERT INTO surge_symbol_settings (
+                user_id,
+                symbol,
+                entry_percent,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, symbol)
+            DO UPDATE SET
+                entry_percent=excluded.entry_percent,
+                updated_at=excluded.updated_at
+        """, (
+            uid,
+            symbol,
+            value,
+            now,
+        ))
+
+        con.commit()
+
+    return value
+
+
+def resolve_surge_entry_percent(
+    user_id,
+    symbol,
+    stage,
+):
+    """
+    최종 급등 진입 비중.
+
+    우선순위:
+      1. 종목별 override
+      2. 차수별 override
+      3. 글로벌 설정
+
+    0%도 유효한 실제 진입 비중이다.
+    """
+    uid = int(user_id)
+    stage = max(1, int(stage))
+
+    symbol_value = get_symbol_entry_percent(
+        uid,
+        symbol,
+    )
+
+    if symbol_value is not None:
+        return {
+            "entry_percent": float(symbol_value),
+            "source": "symbol",
+        }
+
+    stage_settings = get_stage_settings(uid)
+
+    exact = next(
+        (
+            row
+            for row in stage_settings
+            if int(row["stage"]) == stage
+        ),
+        None,
+    )
+
+    if exact is None and stage_settings:
+        exact = stage_settings[-1]
+
+    if exact is not None and not exact["use_global"]:
+        return {
+            "entry_percent":
+                float(exact["entry_percent"]),
+            "source": "stage",
+        }
+
+    settings = get_settings(uid)
+
+    return {
+        "entry_percent": float(
+            settings.get("entry_percent") or 0
+        ),
+        "source": "global",
     }
 
 
@@ -230,10 +523,24 @@ def init_stage_tables():
                 user_id INTEGER NOT NULL,
                 stage INTEGER NOT NULL,
                 entry_percent REAL NOT NULL DEFAULT 0,
+                use_global INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (user_id, stage)
             )
         """)
+
+        stage_columns = {
+            row[1]
+            for row in con.execute(
+                "PRAGMA table_info(surge_stage_settings)"
+            )
+        }
+
+        if "use_global" not in stage_columns:
+            con.execute("""
+                ALTER TABLE surge_stage_settings
+                ADD COLUMN use_global INTEGER NOT NULL DEFAULT 0
+            """)
 
         # 급등매매를 켠 이후 종목별 진행 상태
         con.execute("""
@@ -296,7 +603,8 @@ def get_stage_settings(user_id: int):
         rows = con.execute("""
             SELECT
                 stage,
-                entry_percent
+                entry_percent,
+                use_global
             FROM surge_stage_settings
             WHERE user_id = ?
             ORDER BY stage
@@ -306,6 +614,7 @@ def get_stage_settings(user_id: int):
         {
             "stage": int(row["stage"]),
             "entry_percent": float(row["entry_percent"]),
+            "use_global": bool(row["use_global"]),
         }
         for row in rows
     ]
@@ -350,6 +659,155 @@ def set_stage_percent(
         ))
 
         con.commit()
+
+
+def save_stage_entry_setting(
+    user_id: int,
+    stage: int,
+    *,
+    entry_percent=None,
+    use_global=False,
+):
+    """
+    웹용 차수별 급등 진입 설정.
+
+    use_global=True:
+      해당 차수는 global entry_percent 사용.
+
+    use_global=False:
+      entry_percent를 실제 차수별 override로 사용.
+      0%도 유효하다.
+    """
+    uid = int(user_id)
+    stage = int(stage)
+
+    if stage < 1:
+        raise ValueError("stage must be >= 1")
+
+    init_stage_tables()
+
+    if use_global:
+        with sqlite3.connect(SETTINGS_DB) as con:
+            con.execute("""
+                INSERT INTO surge_stage_settings (
+                    user_id,
+                    stage,
+                    entry_percent,
+                    use_global,
+                    updated_at
+                )
+                VALUES (?, ?, 0, 1, CURRENT_TIMESTAMP)
+
+                ON CONFLICT(user_id, stage)
+                DO UPDATE SET
+                    use_global=1,
+                    updated_at=CURRENT_TIMESTAMP
+            """, (
+                uid,
+                stage,
+            ))
+            con.commit()
+
+        return {
+            "stage": stage,
+            "entry_percent": None,
+            "use_global": True,
+        }
+
+    if entry_percent is None:
+        raise ValueError(
+            "entry_percent required when use_global=False"
+        )
+
+    value = float(entry_percent)
+
+    if value < 0 or value > 1000:
+        raise ValueError(
+            "entry_percent must be 0..1000"
+        )
+
+    with sqlite3.connect(SETTINGS_DB) as con:
+        con.execute("""
+            INSERT INTO surge_stage_settings (
+                user_id,
+                stage,
+                entry_percent,
+                use_global,
+                updated_at
+            )
+            VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
+
+            ON CONFLICT(user_id, stage)
+            DO UPDATE SET
+                entry_percent=excluded.entry_percent,
+                use_global=0,
+                updated_at=CURRENT_TIMESTAMP
+        """, (
+            uid,
+            stage,
+            value,
+        ))
+        con.commit()
+
+    return {
+        "stage": stage,
+        "entry_percent": value,
+        "use_global": False,
+    }
+
+
+def save_surge_auto_trading(
+    user_id: int,
+    enabled: bool,
+):
+    """
+    급등 자동매매 스위치.
+
+    Telegram Reader 일반 자동매매가 ON이면
+    급등 자동매매 ON을 서버 레벨에서 차단한다.
+    """
+    uid = int(user_id)
+    enabled = bool(enabled)
+
+    current = get_settings(uid)
+
+    if enabled:
+        telegram_auto = (
+            telegram_reader_trading_enabled(uid)
+        )
+
+        if telegram_auto:
+            return {
+                "ok": False,
+                "enabled": False,
+                "blocked": True,
+                "reason":
+                    "telegram_reader_trading_enabled",
+                "message":
+                    "Telegram Reader 자동매매가 켜져 있습니다. "
+                    "기존 자동매매를 먼저 끈 뒤 "
+                    "급등 자동매매를 켜주세요.",
+            }
+
+    save_settings(
+        uid,
+        enabled=enabled,
+        entry_percent=float(
+            current["entry_percent"]
+        ),
+    )
+
+    saved = get_settings(uid)
+
+    return {
+        "ok": True,
+        "enabled": bool(
+            saved["enabled"]
+        ),
+        "blocked": False,
+        "reason": None,
+        "message": None,
+    }
 
 
 def get_percent_for_stage(
@@ -500,41 +958,23 @@ def register_signal_stage(
 
         signal_stage = previous_stage + 1
 
-        # 현재 유저의 단계별 비중 조회
-        rows = con.execute("""
-            SELECT stage, entry_percent
-            FROM surge_stage_settings
-            WHERE user_id = ?
-            ORDER BY stage
-        """, (user_id,)).fetchall()
+        # 최종 진입 비중은 공통 resolver를 사용한다.
+        #
+        # 우선순위:
+        #   1. 종목별 override
+        #   2. 차수별 override
+        #   3. 글로벌 설정
+        #
+        # 0%도 유효한 설정값이다.
+        resolved_percent = resolve_surge_entry_percent(
+            user_id,
+            symbol,
+            signal_stage,
+        )
 
-        if not rows:
-            configured_percent = float(
-                DEFAULT_STAGE_PERCENTS.get(
-                    signal_stage,
-                    DEFAULT_STAGE_PERCENTS[
-                        max(DEFAULT_STAGE_PERCENTS)
-                    ],
-                )
-            )
-        else:
-            exact = next(
-                (
-                    row
-                    for row in rows
-                    if int(row["stage"]) == signal_stage
-                ),
-                None,
-            )
-
-            if exact is not None:
-                configured_percent = float(
-                    exact["entry_percent"]
-                )
-            else:
-                configured_percent = float(
-                    rows[-1]["entry_percent"]
-                )
+        configured_percent = float(
+            resolved_percent["entry_percent"]
+        )
 
         con.execute("""
             INSERT INTO surge_signal_events (
@@ -909,8 +1349,9 @@ def get_surge_symbol_entry_plan(user_id: int):
 
         next_stage = signal_count + 1
 
-        entry_percent = get_percent_for_stage(
+        resolved = resolve_surge_entry_percent(
             user_id,
+            row["symbol"],
             next_stage,
         )
 
@@ -919,8 +1360,10 @@ def get_surge_symbol_entry_plan(user_id: int):
             "current_stage": signal_count,
             "next_stage": next_stage,
             "next_entry_percent": float(
-                entry_percent
+                resolved["entry_percent"]
             ),
+            "next_entry_percent_source":
+                resolved["source"],
         })
 
     return result

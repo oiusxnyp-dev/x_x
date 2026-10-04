@@ -200,3 +200,287 @@ button {
         padding: 26px 22px;
     }
 }
+
+
+/* ============================================================
+   Surge trading settings
+   ============================================================ */
+
+.surge-settings-card {
+    margin-top: 30px;
+    padding: 22px;
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: 12px;
+}
+
+.surge-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+}
+
+.surge-description {
+    margin-top: -7px;
+    color: #747981;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.surge-switch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    cursor: pointer;
+    user-select: none;
+}
+
+.surge-switch input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.surge-switch-slider {
+    position: relative;
+    display: inline-block;
+    width: 46px;
+    height: 26px;
+    flex: 0 0 auto;
+    background: #c8ccd1;
+    border-radius: 999px;
+    transition: background 0.15s ease;
+}
+
+.surge-switch-slider::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    transition: transform 0.15s ease;
+}
+
+.surge-switch input:checked + .surge-switch-slider {
+    background: #17191c;
+}
+
+.surge-switch input:checked + .surge-switch-slider::after {
+    transform: translateX(20px);
+}
+
+.surge-switch strong {
+    min-width: 28px;
+    font-size: 13px;
+}
+
+.surge-message {
+    margin-top: 18px;
+    padding: 11px 13px;
+    background: #e9f2e9;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.surge-message-error {
+    background: #f4e8e8;
+}
+
+.surge-setting-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 24px;
+}
+
+.surge-setting-box {
+    padding: 17px;
+    background: #f8f9fa;
+    border: 1px solid #e5e7ea;
+    border-radius: 10px;
+}
+
+.surge-setting-box label {
+    margin-top: 0;
+}
+
+.surge-save-button {
+    padding: 9px 13px;
+    background: #17191c;
+    color: white;
+    font-size: 13px;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.surge-setting-box .surge-save-button {
+    width: 100%;
+    margin-top: 14px;
+}
+
+.surge-help {
+    margin-top: 8px;
+    color: #7b8087;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.surge-subsection {
+    margin-top: 30px;
+    padding-top: 24px;
+    border-top: 1px solid #e6e8eb;
+}
+
+.surge-subtitle {
+    margin-bottom: 14px;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.surge-stage-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.surge-stage-card {
+    padding: 15px;
+    border: 1px solid #e2e5e9;
+    border-radius: 10px;
+    background: #fafafa;
+}
+
+.surge-stage-title {
+    margin-bottom: 11px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.surge-stage-card .percent-input input {
+    min-width: 0;
+}
+
+.surge-global-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 12px 0;
+    color: #62676e;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.surge-global-checkbox input {
+    width: auto;
+    margin: 0;
+}
+
+.surge-stage-card .surge-save-button {
+    width: 100%;
+}
+
+.surge-symbol-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+}
+
+.surge-symbol-heading .surge-subtitle {
+    margin-bottom: 0;
+}
+
+.surge-table-wrap {
+    width: 100%;
+    margin-top: 15px;
+    overflow-x: auto;
+    border: 1px solid #e2e5e9;
+    border-radius: 10px;
+}
+
+.surge-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+    background: white;
+}
+
+.surge-table th,
+.surge-table td {
+    padding: 12px 13px;
+    border-bottom: 1px solid #eceef0;
+    text-align: left;
+    vertical-align: middle;
+    font-size: 13px;
+}
+
+.surge-table th {
+    background: #f7f8f9;
+    color: #666b72;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.surge-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.surge-table tbody tr:hover {
+    background: #fafafa;
+}
+
+.surge-symbol-input {
+    width: 105px;
+    min-width: 90px;
+    margin: 0;
+    padding: 8px 9px;
+}
+
+.surge-table .surge-save-button {
+    padding: 8px 11px;
+}
+
+.surge-loading {
+    padding: 24px !important;
+    color: #7a7f86;
+    text-align: center !important;
+}
+
+
+@media (max-width: 750px) {
+    .surge-setting-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .surge-header {
+        align-items: center;
+    }
+}
+
+
+@media (max-width: 430px) {
+    .surge-settings-card {
+        padding: 18px;
+    }
+
+    .surge-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .surge-stage-grid {
+        grid-template-columns: 1fr;
+    }
+}

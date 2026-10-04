@@ -77,3 +77,598 @@
 
     connect();
 })();
+
+
+/* ============================================================
+ * Surge trading settings UI
+ * ============================================================ */
+(() => {
+    const byId = (id) => document.getElementById(id);
+
+    const sourceLabel = {
+        symbol: "종목",
+        stage: "차수",
+        global: "기본",
+    };
+
+    function showMessage(message, isError = false) {
+        const box = byId("surge-message");
+
+        if (!box) {
+            return;
+        }
+
+        box.hidden = false;
+        box.textContent = message;
+        box.classList.toggle(
+            "surge-message-error",
+            Boolean(isError)
+        );
+
+        clearTimeout(showMessage.timer);
+
+        showMessage.timer = setTimeout(() => {
+            box.hidden = true;
+        }, 3000);
+    }
+
+    async function postForm(path, data) {
+        const body = new URLSearchParams();
+
+        Object.entries(data).forEach(([key, value]) => {
+            body.set(key, String(value));
+        });
+
+        const response = await fetch(path, {
+            method: "POST",
+            headers: {
+                "Content-Type":
+                    "application/x-www-form-urlencoded",
+            },
+            body,
+        });
+
+        const result = await response.json();
+
+        if (!result.ok) {
+            throw new Error(
+                result.error || "저장에 실패했습니다."
+            );
+        }
+
+        return result;
+    }
+
+    function renderStages(stages) {
+        const grid = byId("surge-stage-grid");
+
+        if (!grid) {
+            return;
+        }
+
+        grid.innerHTML = "";
+
+        for (const row of stages || []) {
+            const card = document.createElement("div");
+            card.className = "surge-stage-card";
+
+            const title = document.createElement("div");
+            title.className = "surge-stage-title";
+            title.textContent = `${row.stage}차 진입`;
+
+            const percentWrap =
+                document.createElement("div");
+
+            percentWrap.className = "percent-input";
+
+            const input = document.createElement("input");
+            input.type = "number";
+            input.min = "0";
+            input.max = "1000";
+            input.step = "0.1";
+            input.value = row.entry_percent;
+
+            const percentMark =
+                document.createElement("span");
+
+            percentMark.textContent = "%";
+
+            percentWrap.append(
+                input,
+                percentMark
+            );
+
+            const globalLabel =
+                document.createElement("label");
+
+            globalLabel.className =
+                "surge-global-checkbox";
+
+            const checkbox =
+                document.createElement("input");
+
+            checkbox.type = "checkbox";
+            checkbox.checked =
+                Boolean(row.use_global);
+
+            const checkboxText =
+                document.createElement("span");
+
+            checkboxText.textContent =
+                "기본 비중 사용";
+
+            globalLabel.append(
+                checkbox,
+                checkboxText
+            );
+
+            const button =
+                document.createElement("button");
+
+            button.type = "button";
+            button.className =
+                "surge-save-button";
+
+            button.textContent = "저장";
+
+            button.addEventListener(
+                "click",
+                async () => {
+                    try {
+                        const value =
+                            Number(input.value);
+
+                        if (
+                            !Number.isFinite(value) ||
+                            value < 0 ||
+                            value > 1000
+                        ) {
+                            throw new Error(
+                                "비중은 0~1000% 사이여야 합니다."
+                            );
+                        }
+
+                        await postForm(
+                            "/api/surge/stage",
+                            {
+                                stage: row.stage,
+                                entry_percent: value,
+                                use_global:
+                                    checkbox.checked
+                                        ? 1
+                                        : 0,
+                            }
+                        );
+
+                        showMessage(
+                            `${row.stage}차 설정을 저장했습니다.`
+                        );
+
+                        await loadSettings();
+                    } catch (error) {
+                        showMessage(
+                            error.message,
+                            true
+                        );
+                    }
+                }
+            );
+
+            card.append(
+                title,
+                percentWrap,
+                globalLabel,
+                button
+            );
+
+            grid.appendChild(card);
+        }
+    }
+
+    function renderSymbols(symbols) {
+        const body = byId("surge-symbol-body");
+
+        if (!body) {
+            return;
+        }
+
+        body.innerHTML = "";
+
+        if (!symbols || symbols.length === 0) {
+            const row = document.createElement("tr");
+
+            const cell = document.createElement("td");
+            cell.colSpan = 7;
+            cell.className = "surge-loading";
+            cell.textContent =
+                "급등 신호 종목이 없습니다.";
+
+            row.appendChild(cell);
+            body.appendChild(row);
+            return;
+        }
+
+        for (const item of symbols) {
+            const row = document.createElement("tr");
+
+            const symbolCell =
+                document.createElement("td");
+
+            symbolCell.textContent =
+                item.symbol || "-";
+
+            const countCell =
+                document.createElement("td");
+
+            countCell.textContent =
+                item.signal_count ??
+                item.current_stage ??
+                0;
+
+            const stageCell =
+                document.createElement("td");
+
+            stageCell.textContent =
+                item.next_stage ?? "-";
+
+            const percentCell =
+                document.createElement("td");
+
+            percentCell.textContent =
+                `${item.next_entry_percent ?? 0}%`;
+
+            const sourceCell =
+                document.createElement("td");
+
+            sourceCell.textContent =
+                sourceLabel[
+                    item.next_entry_percent_source
+                ] ||
+                item.next_entry_percent_source ||
+                "-";
+
+            const inputCell =
+                document.createElement("td");
+
+            const input =
+                document.createElement("input");
+
+            input.type = "number";
+            input.min = "0";
+            input.max = "1000";
+            input.step = "0.1";
+            input.placeholder = "자동";
+            input.className =
+                "surge-symbol-input";
+
+            if (
+                item.entry_percent !== null &&
+                item.entry_percent !== undefined
+            ) {
+                input.value =
+                    item.entry_percent;
+            }
+
+            inputCell.appendChild(input);
+
+            const actionCell =
+                document.createElement("td");
+
+            const button =
+                document.createElement("button");
+
+            button.type = "button";
+            button.className =
+                "surge-save-button";
+
+            button.textContent = "저장";
+
+            button.addEventListener(
+                "click",
+                async () => {
+                    try {
+                        const raw =
+                            input.value.trim();
+
+                        if (raw !== "") {
+                            const value =
+                                Number(raw);
+
+                            if (
+                                !Number.isFinite(value) ||
+                                value < 0 ||
+                                value > 1000
+                            ) {
+                                throw new Error(
+                                    "종목 비중은 0~1000% 사이여야 합니다."
+                                );
+                            }
+                        }
+
+                        await postForm(
+                            "/api/surge/symbol",
+                            {
+                                symbol:
+                                    item.symbol,
+                                entry_percent:
+                                    raw,
+                            }
+                        );
+
+                        showMessage(
+                            raw === ""
+                                ? `${item.symbol} 종목 비중을 기본 규칙으로 되돌렸습니다.`
+                                : `${item.symbol} 종목 비중을 저장했습니다.`
+                        );
+
+                        await loadSettings();
+                    } catch (error) {
+                        showMessage(
+                            error.message,
+                            true
+                        );
+                    }
+                }
+            );
+
+            actionCell.appendChild(button);
+
+            row.append(
+                symbolCell,
+                countCell,
+                stageCell,
+                percentCell,
+                sourceCell,
+                inputCell,
+                actionCell
+            );
+
+            body.appendChild(row);
+        }
+    }
+
+    async function loadSettings() {
+        const response = await fetch(
+            "/api/surge/settings",
+            {
+                cache: "no-store",
+            }
+        );
+
+        const data = await response.json();
+
+        if (!data.ok) {
+            throw new Error(
+                data.error ||
+                "급등매매 설정을 불러오지 못했습니다."
+            );
+        }
+
+        const settings = data.settings || {};
+        const trailing = data.trailing || {};
+
+        const enabled = byId("surge-enabled");
+        const enabledText =
+            byId("surge-enabled-text");
+
+        if (enabled) {
+            enabled.checked =
+                Boolean(settings.enabled);
+        }
+
+        if (enabledText) {
+            enabledText.textContent =
+                settings.enabled
+                    ? "ON"
+                    : "OFF";
+        }
+
+        const globalPercent =
+            byId("surge-global-percent");
+
+        if (globalPercent) {
+            globalPercent.value =
+                settings.entry_percent ?? 100;
+        }
+
+        const arm =
+            byId("surge-arm-percent");
+
+        if (arm) {
+            arm.value =
+                trailing.arm_percent ?? 0.5;
+        }
+
+        const gap =
+            byId("surge-gap-percent");
+
+        if (gap) {
+            gap.value =
+                trailing.gap_percent ?? 0.5;
+        }
+
+        renderStages(data.stages || []);
+        renderSymbols(data.symbols || []);
+    }
+
+    function bindEvents() {
+        const enabled = byId("surge-enabled");
+
+        if (enabled) {
+            enabled.addEventListener(
+                "change",
+                async () => {
+                    const desired =
+                        enabled.checked;
+
+                    try {
+                        await postForm(
+                            "/api/surge/enabled",
+                            {
+                                enabled:
+                                    desired ? 1 : 0,
+                            }
+                        );
+
+                        const text =
+                            byId(
+                                "surge-enabled-text"
+                            );
+
+                        if (text) {
+                            text.textContent =
+                                desired
+                                    ? "ON"
+                                    : "OFF";
+                        }
+
+                        showMessage(
+                            desired
+                                ? "급등매매를 활성화했습니다."
+                                : "급등매매를 비활성화했습니다."
+                        );
+                    } catch (error) {
+                        enabled.checked =
+                            !desired;
+
+                        showMessage(
+                            error.message,
+                            true
+                        );
+                    }
+                }
+            );
+        }
+
+        const globalSave =
+            byId("surge-global-save");
+
+        if (globalSave) {
+            globalSave.addEventListener(
+                "click",
+                async () => {
+                    try {
+                        const input =
+                            byId(
+                                "surge-global-percent"
+                            );
+
+                        const value =
+                            Number(input.value);
+
+                        if (
+                            !Number.isFinite(value) ||
+                            value < 0 ||
+                            value > 1000
+                        ) {
+                            throw new Error(
+                                "기본 비중은 0~1000% 사이여야 합니다."
+                            );
+                        }
+
+                        await postForm(
+                            "/api/surge/global",
+                            {
+                                entry_percent:
+                                    value,
+                            }
+                        );
+
+                        showMessage(
+                            "기본 진입 비중을 저장했습니다."
+                        );
+
+                        await loadSettings();
+                    } catch (error) {
+                        showMessage(
+                            error.message,
+                            true
+                        );
+                    }
+                }
+            );
+        }
+
+        const trailingSave =
+            byId("surge-trailing-save");
+
+        if (trailingSave) {
+            trailingSave.addEventListener(
+                "click",
+                async () => {
+                    try {
+                        const arm =
+                            Number(
+                                byId(
+                                    "surge-arm-percent"
+                                ).value
+                            );
+
+                        const gap =
+                            Number(
+                                byId(
+                                    "surge-gap-percent"
+                                ).value
+                            );
+
+                        if (
+                            !Number.isFinite(arm) ||
+                            !Number.isFinite(gap) ||
+                            arm < 0 ||
+                            gap < 0
+                        ) {
+                            throw new Error(
+                                "트레일링 값은 0 이상이어야 합니다."
+                            );
+                        }
+
+                        await postForm(
+                            "/api/surge/trailing",
+                            {
+                                arm_percent: arm,
+                                gap_percent: gap,
+                            }
+                        );
+
+                        showMessage(
+                            "트레일링 설정을 저장했습니다."
+                        );
+
+                        await loadSettings();
+                    } catch (error) {
+                        showMessage(
+                            error.message,
+                            true
+                        );
+                    }
+                }
+            );
+        }
+    }
+
+    async function start() {
+        if (!byId("surge-enabled")) {
+            return;
+        }
+
+        bindEvents();
+
+        try {
+            await loadSettings();
+        } catch (error) {
+            showMessage(
+                error.message,
+                true
+            );
+        }
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener(
+            "DOMContentLoaded",
+            start
+        );
+    } else {
+        start();
+    }
+})();
