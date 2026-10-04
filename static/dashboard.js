@@ -509,6 +509,7 @@
 
         const settings = data.settings || {};
         const trailing = data.trailing || {};
+        const symbols = data.symbols || [];
 
         const enabled = byId("surge-enabled");
         const enabledText =
@@ -534,6 +535,34 @@
                 settings.entry_percent ?? 100;
         }
 
+        const globalNotional =
+            byId("surge-global-notional");
+
+        if (globalNotional) {
+            const available =
+                symbols.length > 0
+                    ? Number(symbols[0].available)
+                    : NaN;
+
+            const percent =
+                Number(settings.entry_percent ?? 0);
+
+            if (
+                Number.isFinite(available) &&
+                Number.isFinite(percent)
+            ) {
+                const notional =
+                    available * percent / 100;
+
+                globalNotional.textContent =
+                    `예상 명목가치: ` +
+                    `${notional.toFixed(2)} USDT`;
+            } else {
+                globalNotional.textContent =
+                    "예상 명목가치: 계산 불가";
+            }
+        }
+
         const arm =
             byId("surge-arm-percent");
 
@@ -551,7 +580,7 @@
         }
 
         renderStages(data.stages || []);
-        renderSymbols(data.symbols || []);
+        renderSymbols(symbols);
     }
 
     function bindEvents() {
