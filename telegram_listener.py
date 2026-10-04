@@ -204,6 +204,18 @@ async def main():
                     ),
                 )
                 print(
+                    "price src  =",
+                    final_plan.get(
+                        "price_source"
+                    ),
+                )
+                print(
+                    "price age  =",
+                    final_plan.get(
+                        "price_age"
+                    ),
+                )
+                print(
                     "qty        =",
                     final_plan.get("qty"),
                 )
