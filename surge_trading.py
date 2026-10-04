@@ -1780,7 +1780,8 @@ def get_symbol_order_info(
     instruments.db에 종목이 없으면 신규상장 가능성이 있으므로
     instrument cache 전체 refresh를 1회 수행한 뒤 다시 조회한다.
     """
-    from realtime import market_prices
+    import time
+    import redis
 
     user_id = int(user_id)
 
@@ -1825,89 +1826,79 @@ def get_symbol_order_info(
         )
 
     # --------------------------------------------------------
-    # 2. Realtime price -> global public ticker WS
+    # 2. Realtime price -> Redis market producer
     # --------------------------------------------------------
 
-    ws_row = market_prices.get(
-        symbol
+    redis_client = redis.Redis(
+        host="127.0.0.1",
+        port=6379,
+        decode_responses=True,
+        socket_connect_timeout=1.0,
+        socket_timeout=1.0,
     )
 
-    ws_age = market_prices.age(
-        symbol
-    )
+    try:
+        market_row = redis_client.hgetall(
+            f"market:{symbol}"
+        )
+    except redis.RedisError as exc:
+        raise RuntimeError(
+            "Redis market read failed: "
+            f"{symbol}: {exc}"
+        ) from exc
 
-    price = None
-    price_source = None
+    if not market_row:
+        raise RuntimeError(
+            f"Redis market price missing: {symbol}"
+        )
+
+    try:
+        updated_at = float(
+            market_row.get("updated_at") or 0
+        )
+    except (TypeError, ValueError):
+        updated_at = 0.0
+
+    price_age = (
+        max(0.0, time.time() - updated_at)
+        if updated_at > 0
+        else None
+    )
 
     if (
-        ws_row is not None
-        and ws_age is not None
-        and ws_age <= 5.0
+        price_age is None
+        or price_age > 5.0
     ):
-        # 기존 주문 계산과 동일하게 markPrice 우선.
-        raw_price = (
-            ws_row.get("markPrice")
-            or ws_row.get("lastPrice")
+        raise RuntimeError(
+            "Redis market price stale: "
+            f"{symbol} age={price_age}"
         )
 
-        try:
-            price = float(
-                raw_price or 0
-            )
-        except (TypeError, ValueError):
-            price = 0.0
+    raw_price = (
+        market_row.get("markPrice")
+        or market_row.get("lastPrice")
+    )
 
-        if price > 0:
-            price_source = "WS"
+    try:
+        price = float(raw_price or 0)
+    except (TypeError, ValueError):
+        price = 0.0
 
-    # --------------------------------------------------------
-    # 3. WS miss / stale / invalid -> REST fallback
-    # --------------------------------------------------------
-
-    if price is None or price <= 0:
-        from get_session import get_session
-
-        session = get_session(user_id)
-
-        if session is None:
-            raise RuntimeError(
-                f"Bybit session not found: user_id={user_id}"
-            )
-
-        ticker_response = session.get_tickers(
-            category="linear",
-            symbol=symbol,
+    if price <= 0:
+        raise RuntimeError(
+            "Redis market price invalid: "
+            f"{symbol} price={raw_price}"
         )
 
-        ticker_result = ticker_response.get(
-            "result",
-            {}
-        )
+    producer_source = str(
+        market_row.get("source") or ""
+    ).strip()
 
-        ticker_rows = ticker_result.get(
-            "list",
-            []
-        )
-
-        if not ticker_rows:
-            raise RuntimeError(
-                f"Ticker not found: {symbol}"
-            )
-
-        ticker = ticker_rows[0]
-
-        price = float(
-            ticker.get("markPrice")
-            or ticker.get("lastPrice")
-            or 0
-        )
-
-        if price <= 0:
-            raise RuntimeError(
-                f"Invalid ticker price: {symbol}"
-            )
-
-        price_source = "REST_FALLBACK"
+    price_source = (
+        f"REDIS_{producer_source}"
+        if producer_source
+        else "REDIS"
+    )
 
     return {
         "symbol":
@@ -1961,7 +1952,7 @@ def get_symbol_order_info(
             price_source,
 
         "price_age":
-            ws_age,
+            price_age,
     }
 
 def calculate_surge_order_qty(
@@ -2139,6 +2130,13 @@ def build_surge_order_plan(
     result = {
         **entry,
         **qty_plan,
+
+        # 실제 주문수량 계산에 사용된 가격 metadata.
+        "price_source":
+            order_info.get("price_source"),
+
+        "price_age":
+            order_info.get("price_age"),
     }
 
     result["entry_limit_reason"] = (
