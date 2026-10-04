@@ -1,6 +1,15 @@
 import threading
 from decimal import Decimal
 
+import redis
+
+
+_market_redis = redis.Redis(
+    host="127.0.0.1",
+    port=6379,
+    decode_responses=True,
+)
+
 
 class RealtimeState:
     def __init__(self):
@@ -100,10 +109,9 @@ class RealtimeState:
                 dict(p)
                 for p in state["positions"].values()
             ]
-            prices = dict(state["prices"])
-
         total_upl = Decimal("0")
         output_positions = []
+        missing_lastprice = False
 
         for p in positions:
             symbol = p["symbol"]
@@ -111,18 +119,22 @@ class RealtimeState:
             size = Decimal(p["size"])
             avg = Decimal(p["avgPrice"])
 
-            price_text = prices.get(symbol)
+            price_text = _market_redis.hget(
+                f"market:{symbol}",
+                "lastPrice",
+            )
 
             if price_text is None:
-                mark = None
+                last = None
                 upl = None
+                missing_lastprice = True
             else:
-                mark = Decimal(price_text)
+                last = Decimal(price_text)
 
                 if side == "Buy":
-                    upl = (mark - avg) * size
+                    upl = (last - avg) * size
                 elif side == "Sell":
-                    upl = (avg - mark) * size
+                    upl = (avg - last) * size
                 else:
                     upl = Decimal("0")
 
@@ -130,9 +142,9 @@ class RealtimeState:
 
             output_positions.append({
                 **p,
-                "markPrice": (
-                    str(mark)
-                    if mark is not None
+                "lastPrice": (
+                    str(last)
+                    if last is not None
                     else None
                 ),
                 "unrealisedPnl": (
@@ -142,9 +154,38 @@ class RealtimeState:
                 ),
             })
 
+        # Dashboard Equity도 Unrealised PnL과 동일하게
+        # Redis Bybit WS lastPrice 기준으로 표시한다.
+        #
+        # wallet["wallet"] = Bybit totalWalletBalance
+        # display equity   = wallet balance + lastPrice UPL
+        wallet_balance_text = wallet.get("wallet")
+
+        if (
+            not missing_lastprice
+            and wallet_balance_text not in (None, "")
+        ):
+            wallet_balance = Decimal(
+                str(wallet_balance_text)
+            )
+
+            wallet["equity"] = str(
+                wallet_balance + total_upl
+            )
+            wallet["unrealised"] = str(total_upl)
+
+            display_unrealised = str(total_upl)
+        else:
+            # Redis lastPrice가 하나라도 없으면
+            # 불완전한 합계를 표시하지 않고
+            # Bybit wallet 값을 그대로 유지한다.
+            display_unrealised = wallet.get(
+                "unrealised"
+            )
+
         return {
             "wallet": wallet,
-            "unrealised": str(total_upl),
+            "unrealised": display_unrealised,
             "positions": output_positions,
         }
 
