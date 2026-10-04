@@ -3,6 +3,7 @@ import time
 import re
 from pathlib import Path
 from collections import defaultdict
+from contextlib import closing
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -17,7 +18,7 @@ MENGGUL_CHAT_ID = -1004442764226
 
 
 def init_db():
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.execute("""
             CREATE TABLE IF NOT EXISTS surge_settings (
                 user_id INTEGER PRIMARY KEY,
@@ -32,7 +33,7 @@ def init_db():
 def get_settings(user_id: int):
     init_db()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.row_factory = sqlite3.Row
 
         row = con.execute("""
@@ -78,7 +79,7 @@ def init_surge_web_settings():
 
     기존 surge_settings / stage 설정은 그대로 사용한다.
     """
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         columns = {
             row[1]
             for row in con.execute(
@@ -121,7 +122,7 @@ def init_surge_web_settings():
 def get_surge_trailing_settings(user_id):
     init_surge_web_settings()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         row = con.execute("""
             SELECT
                 trail_arm_percent,
@@ -182,7 +183,7 @@ def save_surge_trailing_settings(
     # 기존 row 생성/기본값 처리는 기존 설정 함수를 이용한다.
     get_settings(uid)
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.execute("""
             UPDATE surge_settings
             SET
@@ -211,7 +212,7 @@ def get_symbol_entry_percent(
     if not symbol:
         return None
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         row = con.execute("""
             SELECT entry_percent
             FROM surge_symbol_settings
@@ -245,7 +246,7 @@ def save_symbol_entry_percent(
 
     # None = override 삭제
     if entry_percent is None:
-        with sqlite3.connect(SETTINGS_DB) as con:
+        with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
             con.execute("""
                 DELETE FROM surge_symbol_settings
                 WHERE user_id=?
@@ -268,7 +269,7 @@ def save_symbol_entry_percent(
 
     now = time.time()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.execute("""
             INSERT INTO surge_symbol_settings (
                 user_id,
@@ -423,7 +424,7 @@ def save_settings(
 
     init_db()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.execute("""
             INSERT INTO surge_settings (
                 user_id,
@@ -450,7 +451,7 @@ def save_settings(
 def force_disable(user_id: int):
     init_db()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.execute("""
             UPDATE surge_settings
             SET
@@ -516,7 +517,7 @@ DEFAULT_STAGE_PERCENTS = {
 
 
 def init_stage_tables():
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         # 유저별 신호 단계 비중
         con.execute("""
             CREATE TABLE IF NOT EXISTS surge_stage_settings (
@@ -576,7 +577,7 @@ def init_stage_tables():
 def ensure_default_stage_settings(user_id: int):
     init_stage_tables()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         for stage, percent in DEFAULT_STAGE_PERCENTS.items():
             con.execute("""
                 INSERT OR IGNORE INTO surge_stage_settings (
@@ -597,7 +598,7 @@ def ensure_default_stage_settings(user_id: int):
 def get_stage_settings(user_id: int):
     ensure_default_stage_settings(user_id)
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.row_factory = sqlite3.Row
 
         rows = con.execute("""
@@ -638,7 +639,7 @@ def set_stage_percent(
 
     init_stage_tables()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.execute("""
             INSERT INTO surge_stage_settings (
                 user_id,
@@ -687,7 +688,7 @@ def save_stage_entry_setting(
     init_stage_tables()
 
     if use_global:
-        with sqlite3.connect(SETTINGS_DB) as con:
+        with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
             con.execute("""
                 INSERT INTO surge_stage_settings (
                     user_id,
@@ -726,7 +727,7 @@ def save_stage_entry_setting(
             "entry_percent must be 0..1000"
         )
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.execute("""
             INSERT INTO surge_stage_settings (
                 user_id,
@@ -849,7 +850,7 @@ def get_symbol_cycle(user_id: int, symbol: str):
 
     symbol = str(symbol).upper().strip()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.row_factory = sqlite3.Row
 
         row = con.execute("""
@@ -905,7 +906,7 @@ def register_signal_stage(
     if not symbol:
         raise ValueError("symbol is empty")
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.row_factory = sqlite3.Row
 
         con.execute("BEGIN IMMEDIATE")
@@ -1039,7 +1040,7 @@ def reset_symbol_cycle(user_id: int, symbol: str):
 
     symbol = str(symbol).upper().strip()
 
-    with sqlite3.connect(SETTINGS_DB) as con:
+    with closing(sqlite3.connect(SETTINGS_DB)) as con, con:
         con.execute("""
             DELETE FROM surge_symbol_cycles
             WHERE user_id = ?
