@@ -823,17 +823,24 @@ def get_percent_for_stage(
       stage 5 = 50%
       6차, 7차, 8차... 모두 50%
     """
-    settings = get_stage_settings(user_id)
-
-    if not settings:
-        return 0.0
-
     signal_stage = max(1, int(signal_stage))
+
+    # 첫 등장은 별도의 1차 override를 사용하지 않는다.
+    # "기본 진입 비중" 자체가 첫 진입 비중이다.
+    if signal_stage == 1:
+        settings = get_settings(user_id)
+        return float(settings["entry_percent"])
+
+    stage_settings = get_stage_settings(user_id)
+
+    if not stage_settings:
+        settings = get_settings(user_id)
+        return float(settings["entry_percent"])
 
     exact = next(
         (
             row
-            for row in settings
+            for row in stage_settings
             if row["stage"] == signal_stage
         ),
         None,
@@ -842,7 +849,10 @@ def get_percent_for_stage(
     if exact:
         return float(exact["entry_percent"])
 
-    return float(settings[-1]["entry_percent"])
+    # 설정된 마지막 차수를 "이후" 값으로 사용한다.
+    return float(
+        stage_settings[-1]["entry_percent"]
+    )
 
 
 def get_symbol_cycle(user_id: int, symbol: str):

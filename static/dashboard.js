@@ -273,12 +273,24 @@
         grid.innerHTML = "";
 
         for (const row of stages || []) {
+            const stageNumber =
+                Number(row.stage);
+
+            // 첫 등장은 위의 기본 진입 비중을 사용한다.
+            // 별도의 1차 설정 카드는 필요하지 않다.
+            if (stageNumber === 1) {
+                continue;
+            }
+
             const card = document.createElement("div");
             card.className = "surge-stage-card";
 
             const title = document.createElement("div");
             title.className = "surge-stage-title";
-            title.textContent = `${row.stage}차 진입`;
+            title.textContent =
+                stageNumber >= 5
+                    ? "5차 이후 진입"
+                    : `${stageNumber}차 진입`;
 
             const percentWrap =
                 document.createElement("div");
@@ -364,8 +376,13 @@
                             }
                         );
 
+                        const stageLabel =
+                            stageNumber >= 5
+                                ? "5차 이후"
+                                : `${stageNumber}차`;
+
                         showMessage(
-                            `${row.stage}차 설정을 저장했습니다.`
+                            `${stageLabel} 설정을 저장했습니다.`
                         );
 
                         await loadSettings();
