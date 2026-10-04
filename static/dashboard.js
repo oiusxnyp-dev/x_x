@@ -314,8 +314,24 @@
             const percentCell =
                 document.createElement("td");
 
-            percentCell.textContent =
-                `${item.next_entry_percent ?? 0}%`;
+            const percentValue =
+                item.next_entry_percent ?? 0;
+
+            const notionalValue =
+                Number(item.next_entry_notional);
+
+            if (
+                item.next_entry_notional !== null &&
+                item.next_entry_notional !== undefined &&
+                Number.isFinite(notionalValue)
+            ) {
+                percentCell.textContent =
+                    `${percentValue}% · ` +
+                    `${notionalValue.toFixed(2)} USDT`;
+            } else {
+                percentCell.textContent =
+                    `${percentValue}% · 명목가치 계산 불가`;
+            }
 
             const sourceCell =
                 document.createElement("td");

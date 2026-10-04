@@ -212,6 +212,56 @@ async def surge_settings_api(request: Request):
             user_id
         )
 
+        # 급등매매의 진입 비중은 증거금 비중이 아니라
+        # 현재 Available 대비 주문 명목가치 비중이다.
+        #
+        # 종목마다 Bybit REST를 호출하지 않고
+        # wallet Available을 한 번만 조회한 뒤
+        # 각 종목의 다음 진입 비중으로 예상 명목가치를 계산한다.
+        session = get_session(user_id)
+
+        surge_available = None
+
+        if session is not None:
+            wallet_result = session.get_wallet_balance(
+                accountType="UNIFIED",
+            )
+
+            wallet_rows = (
+                wallet_result
+                .get("result", {})
+                .get("list", [])
+            )
+
+            if wallet_rows:
+                surge_available = float(
+                    wallet_rows[0].get(
+                        "totalAvailableBalance"
+                    ) or 0
+                )
+
+        for symbol_row in symbols:
+            percent = float(
+                symbol_row.get(
+                    "next_entry_percent"
+                ) or 0
+            )
+
+            symbol_row["available"] = surge_available
+
+            if surge_available is None:
+                symbol_row[
+                    "next_entry_notional"
+                ] = None
+            else:
+                symbol_row[
+                    "next_entry_notional"
+                ] = (
+                    surge_available
+                    * percent
+                    / 100.0
+                )
+
         return {
             "ok": True,
             "settings": settings,
