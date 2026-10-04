@@ -363,6 +363,38 @@
 
             button.textContent = "저장";
 
+            const inlineMessage =
+                document.createElement("div");
+
+            inlineMessage.className =
+                "surge-symbol-message";
+
+            inlineMessage.hidden = true;
+
+            let inlineMessageTimer = null;
+
+            const showSymbolMessage = (
+                message,
+                isError = false
+            ) => {
+                inlineMessage.textContent = message;
+                inlineMessage.hidden = false;
+
+                inlineMessage.classList.toggle(
+                    "surge-symbol-message-error",
+                    Boolean(isError)
+                );
+
+                clearTimeout(inlineMessageTimer);
+
+                inlineMessageTimer = setTimeout(
+                    () => {
+                        inlineMessage.hidden = true;
+                    },
+                    3000
+                );
+            };
+
             button.addEventListener(
                 "click",
                 async () => {
@@ -395,15 +427,27 @@
                             }
                         );
 
-                        showMessage(
+                        showSymbolMessage(
                             raw === ""
-                                ? `${item.symbol} 종목 비중을 기본 규칙으로 되돌렸습니다.`
-                                : `${item.symbol} 종목 비중을 저장했습니다.`
+                                ? "기본 규칙 적용"
+                                : "저장됨"
                         );
 
-                        await loadSettings();
+                        setTimeout(
+                            () => {
+                                loadSettings().catch(
+                                    (error) => {
+                                        showMessage(
+                                            error.message,
+                                            true
+                                        );
+                                    }
+                                );
+                            },
+                            700
+                        );
                     } catch (error) {
-                        showMessage(
+                        showSymbolMessage(
                             error.message,
                             true
                         );
@@ -411,7 +455,10 @@
                 }
             );
 
-            actionCell.appendChild(button);
+            actionCell.append(
+                button,
+                inlineMessage
+            );
 
             row.append(
                 symbolCell,
