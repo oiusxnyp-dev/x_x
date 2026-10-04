@@ -85,6 +85,75 @@ class SurgeTrailingManager:
 
         return price
 
+    def get_active_key(self):
+        return (
+            f"surge:trail:active:{self.user_id}"
+        )
+
+    def get_active_symbols(self):
+        """
+        실제 급등 주문 접수 후 reset event를 받은
+        종목만 trailing 관리 대상으로 사용한다.
+        """
+        try:
+            rows = self.redis.smembers(
+                self.get_active_key()
+            )
+        except redis.RedisError as exc:
+            print(
+                "[SURGE TRAIL ACTIVE READ ERROR]",
+                repr(exc),
+                flush=True,
+            )
+            return set()
+
+        return {
+            str(symbol).upper().strip()
+            for symbol in rows
+            if symbol
+        }
+
+    def activate_symbol(self, symbol):
+        symbol = str(symbol).upper().strip()
+
+        if not symbol:
+            return
+
+        self.redis.sadd(
+            self.get_active_key(),
+            symbol,
+        )
+
+        print(
+            "[SURGE TRAIL ACTIVE ADD]",
+            f"user_id={self.user_id}",
+            f"symbol={symbol}",
+            flush=True,
+        )
+
+    def deactivate_symbol(self, symbol):
+        symbol = str(symbol).upper().strip()
+
+        if not symbol:
+            return
+
+        self.redis.srem(
+            self.get_active_key(),
+            symbol,
+        )
+
+        self.states.pop(
+            symbol,
+            None,
+        )
+
+        print(
+            "[SURGE TRAIL ACTIVE REMOVE]",
+            f"user_id={self.user_id}",
+            f"symbol={symbol}",
+            flush=True,
+        )
+
     def consume_reset_event(self):
         """
         surge_trading.py가 실제 급등 주문 접수 후 발행한
@@ -134,6 +203,12 @@ class SurgeTrailingManager:
             self.last_reset_event = value
             return
 
+        # 실제 급등 주문이 정상 접수된 뒤 발행된 event이므로
+        # 이 시점부터 해당 종목을 trailing 대상으로 등록한다.
+        self.activate_symbol(symbol)
+
+        # 같은 종목의 기존 trailing cycle이 있다면 제거.
+        # 다음 포지션 조회에서 실제 Bybit avgPrice로 다시 시작한다.
         self.reset_symbol(symbol)
 
         self.last_reset_event = value
@@ -186,6 +261,10 @@ class SurgeTrailingManager:
             .get("list", [])
         )
 
+        active_symbols = (
+            self.get_active_symbols()
+        )
+
         positions = {}
 
         for row in rows:
@@ -218,6 +297,11 @@ class SurgeTrailingManager:
             ).upper()
 
             if not symbol:
+                continue
+
+            # 급등 주문 접수 후 active로 등록된 종목만 관리한다.
+            # 기존 수동 LONG / 다른 전략 LONG은 여기서 제외된다.
+            if symbol not in active_symbols:
                 continue
 
             positions[symbol] = {
@@ -447,10 +531,13 @@ class SurgeTrailingManager:
                     self.get_long_positions()
                 )
 
-                # 종료된 포지션 state 제거
-                for symbol in list(
-                    self.states
-                ):
+                # active로 등록되어 있었지만 실제 LONG이 사라졌다면
+                # 해당 급등 trailing cycle은 완전히 종료한다.
+                active_symbols = (
+                    self.get_active_symbols()
+                )
+
+                for symbol in active_symbols:
                     if symbol not in positions:
                         print(
                             "[SURGE TRAIL REMOVE]",
@@ -458,9 +545,8 @@ class SurgeTrailingManager:
                             flush=True,
                         )
 
-                        self.states.pop(
-                            symbol,
-                            None,
+                        self.deactivate_symbol(
+                            symbol
                         )
 
                 for position in (
