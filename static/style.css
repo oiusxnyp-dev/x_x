@@ -498,3 +498,1466 @@ button {
 .surge-symbol-message-error {
     color: #a04444;
 }
+
+
+/* ============================================================
+   Open position details
+   ============================================================ */
+
+.position-details {
+    margin-top: 18px;
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.position-details-title {
+    padding: 16px 20px;
+    border-bottom: 1px solid #e8eaed;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.position-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.position-table {
+    width: 100%;
+    border-collapse: collapse;
+    white-space: nowrap;
+}
+
+.position-table th,
+.position-table td {
+    padding: 14px 18px;
+    border-bottom: 1px solid #eef0f2;
+    text-align: right;
+    font-size: 14px;
+}
+
+.position-table th {
+    background: #fafbfc;
+    color: #747981;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.position-table th:first-child,
+.position-table td:first-child {
+    text-align: left;
+}
+
+.position-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.position-side,
+.position-pnl {
+    font-weight: 700;
+}
+
+.position-long,
+.position-profit {
+    color: #147a42;
+}
+
+.position-short,
+.position-loss {
+    color: #c13b3b;
+}
+
+.position-empty {
+    padding: 22px !important;
+    color: #747981;
+    text-align: center !important;
+}
+
+@media (max-width: 750px) {
+    .position-table th,
+    .position-table td {
+        padding: 12px 14px;
+        font-size: 13px;
+    }
+}
+
+
+/* ============================================================
+   DARK TRADING DASHBOARD THEME
+   V3 - Exchange Terminal
+   ============================================================ */
+
+:root {
+    color-scheme: dark;
+
+    --v3-bg: #07090d;
+    --v3-panel: #0d1117;
+    --v3-panel-2: #111720;
+    --v3-panel-3: #151c26;
+
+    --v3-line: #202936;
+    --v3-line-soft: #171f2a;
+
+    --v3-text: #f3f6fa;
+    --v3-muted: #8995a5;
+    --v3-dim: #5f6b7a;
+
+    --v3-blue: #3b82f6;
+    --v3-blue-soft: rgba(59, 130, 246, .11);
+
+    --v3-green: #21d07a;
+    --v3-red: #ff5263;
+
+    --v3-radius: 10px;
+}
+
+
+/* ===== BASE ===== */
+
+html {
+    background: var(--v3-bg);
+}
+
+body {
+    min-height: 100vh;
+    background:
+        radial-gradient(
+            900px 420px at 50% -180px,
+            rgba(45, 108, 223, .12),
+            transparent 70%
+        ),
+        var(--v3-bg);
+
+    color: var(--v3-text);
+}
+
+::selection {
+    background: rgba(59, 130, 246, .35);
+}
+
+.container {
+    width: calc(100% - 48px);
+    max-width: 1480px;
+    margin: 30px auto 60px;
+    padding: 0;
+}
+
+
+/* ===== TOP BAR ===== */
+
+.topbar {
+    min-height: 68px;
+
+    padding:
+        12px
+        max(24px, calc((100% - 1480px) / 2));
+
+    background: rgba(8, 11, 16, .94);
+    border-bottom: 1px solid var(--v3-line);
+
+    backdrop-filter: blur(14px);
+}
+
+.brand {
+    color: #fff;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -.5px;
+}
+
+.username {
+    margin-top: 2px;
+    color: var(--v3-muted);
+    font-size: 11px;
+}
+
+.logout-button {
+    padding: 8px 14px;
+
+    background: #111720;
+    border: 1px solid #293342;
+    border-radius: 7px;
+
+    color: #aeb8c5;
+    font-size: 12px;
+    font-weight: 650;
+
+    transition: .15s ease;
+}
+
+.logout-button:hover {
+    color: #fff;
+    background: #18212d;
+    border-color: #3a485a;
+}
+
+
+/* ===== SECTION TITLE ===== */
+
+.section-title {
+    margin-bottom: 13px;
+
+    color: #f5f7fa;
+    font-size: 15px;
+    font-weight: 750;
+    letter-spacing: -.2px;
+}
+
+
+/* ============================================================
+   WALLET
+   ============================================================ */
+
+.wallet-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.wallet-card {
+    position: relative;
+    min-height: 106px;
+    padding: 17px 18px;
+
+    background:
+        linear-gradient(
+            145deg,
+            #111720,
+            #0c1118
+        );
+
+    border: 1px solid var(--v3-line);
+    border-radius: var(--v3-radius);
+
+    box-shadow:
+        0 8px 28px rgba(0, 0, 0, .18);
+
+    overflow: hidden;
+}
+
+.wallet-card::before {
+    content: "";
+    position: absolute;
+
+    top: 0;
+    left: 16px;
+    right: 16px;
+
+    height: 1px;
+
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            rgba(83, 145, 255, .75),
+            transparent
+        );
+
+    opacity: .6;
+}
+
+.wallet-card > span {
+    color: var(--v3-muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.wallet-card strong {
+    margin-top: 11px;
+
+    color: #fff;
+    font-size: clamp(18px, 1.5vw, 24px);
+    font-weight: 750;
+
+    letter-spacing: -.35px;
+    font-variant-numeric: tabular-nums;
+}
+
+.wallet-card strong span {
+    color: inherit;
+    font-size: inherit;
+}
+
+.wallet-card small {
+    display: block;
+    margin-top: 4px;
+
+    color: var(--v3-dim);
+    font-size: 10px;
+}
+
+
+/* ============================================================
+   OPEN POSITIONS
+   ============================================================ */
+
+.position-details {
+    margin-top: 10px;
+
+    background: var(--v3-panel);
+    border: 1px solid var(--v3-line);
+    border-radius: var(--v3-radius);
+
+    box-shadow:
+        0 8px 28px rgba(0, 0, 0, .16);
+
+    overflow: hidden;
+}
+
+.position-details-title {
+    padding: 12px 16px;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(59, 130, 246, .08),
+            transparent 38%
+        );
+
+    border-bottom: 1px solid var(--v3-line);
+
+    color: #e9eef5;
+    font-size: 13px;
+    font-weight: 750;
+}
+
+.position-table {
+    background: transparent;
+}
+
+.position-table th,
+.position-table td {
+    padding: 11px 16px;
+}
+
+.position-table th {
+    background: #0a0e14;
+
+    border-bottom: 1px solid var(--v3-line);
+
+    color: #647286;
+    font-size: 9px;
+    font-weight: 750;
+
+    text-transform: uppercase;
+    letter-spacing: .45px;
+}
+
+.position-table td {
+    border-bottom: 1px solid var(--v3-line-soft);
+
+    color: #dce3ec;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.position-table tbody tr {
+    transition: background .12s ease;
+}
+
+.position-table tbody tr:hover {
+    background: #111923;
+}
+
+.position-long,
+.position-profit {
+    color: var(--v3-green) !important;
+}
+
+.position-short,
+.position-loss {
+    color: var(--v3-red) !important;
+}
+
+.position-side,
+.position-pnl {
+    font-weight: 800;
+}
+
+.position-empty {
+    color: var(--v3-dim) !important;
+}
+
+
+/* ============================================================
+   SURGE CONTROL PANEL
+   ============================================================ */
+
+.surge-settings-card {
+    margin-top: 18px;
+    padding: 0;
+
+    background: var(--v3-panel);
+    border: 1px solid var(--v3-line);
+    border-radius: 12px;
+
+    box-shadow:
+        0 12px 36px rgba(0, 0, 0, .20);
+
+    overflow: hidden;
+}
+
+
+/* ===== SURGE HEADER ===== */
+
+.surge-header {
+    min-height: 76px;
+    padding: 17px 20px;
+
+    align-items: center;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(59, 130, 246, .075),
+            transparent 42%
+        );
+
+    border-bottom: 1px solid var(--v3-line);
+}
+
+.surge-header .section-title {
+    margin-bottom: 4px;
+
+    font-size: 17px;
+    font-weight: 800;
+}
+
+.surge-description {
+    margin: 0;
+
+    color: var(--v3-muted);
+    font-size: 11px;
+}
+
+
+/* ===== SWITCH ===== */
+
+.surge-switch {
+    gap: 9px;
+}
+
+.surge-switch-slider {
+    width: 42px;
+    height: 23px;
+
+    background: #293341;
+    border: 1px solid #364252;
+}
+
+.surge-switch-slider::after {
+    width: 17px;
+    height: 17px;
+
+    top: 2px;
+    left: 2px;
+
+    background: #cbd3dd;
+}
+
+.surge-switch input:checked + .surge-switch-slider {
+    background: #20bd78;
+    border-color: #20bd78;
+
+    box-shadow:
+        0 0 14px rgba(32, 189, 120, .24);
+}
+
+.surge-switch input:checked + .surge-switch-slider::after {
+    transform: translateX(19px);
+    background: white;
+}
+
+.surge-switch strong {
+    color: #aeb8c4;
+    font-size: 11px;
+}
+
+
+/* ===== MAIN SETTINGS ===== */
+
+.surge-setting-grid {
+    grid-template-columns:
+        minmax(0, 1.15fr)
+        minmax(0, 1fr)
+        minmax(0, 1fr);
+
+    gap: 10px;
+    margin: 0;
+    padding: 16px 20px 18px;
+}
+
+.surge-setting-box {
+    min-height: 145px;
+    padding: 14px;
+
+    background:
+        linear-gradient(
+            145deg,
+            #121923,
+            #0f151d
+        );
+
+    border: 1px solid #222c39;
+    border-radius: 8px;
+
+    box-shadow: none;
+
+    transition:
+        border-color .15s ease,
+        background .15s ease;
+}
+
+.surge-setting-box:hover {
+    transform: none;
+
+    background:
+        linear-gradient(
+            145deg,
+            #151d28,
+            #111821
+        );
+
+    border-color: #344257;
+}
+
+.surge-setting-box label {
+    margin: 0 0 9px;
+
+    color: #dce3eb;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+
+/* ===== INPUT ===== */
+
+input {
+    background: #090e14;
+    border: 1px solid #2a3645;
+    border-radius: 6px;
+
+    color: #f5f7fa;
+}
+
+input:hover {
+    border-color: #3a4a5e;
+}
+
+input:focus {
+    background: #0b1119;
+    border-color: #4c8dff;
+
+    box-shadow:
+        0 0 0 2px rgba(76, 141, 255, .12);
+}
+
+.percent-input {
+    gap: 7px;
+}
+
+.percent-input input {
+    margin: 0;
+    padding: 9px 10px;
+
+    font-size: 13px;
+    font-weight: 650;
+
+    font-variant-numeric: tabular-nums;
+}
+
+.percent-input span {
+    margin: 0;
+
+    color: var(--v3-muted);
+    font-size: 11px;
+}
+
+.surge-help {
+    margin-top: 7px;
+
+    color: #647184;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+
+/* ===== BUTTON ===== */
+
+.surge-save-button {
+    padding: 8px 12px;
+
+    background: #1a2431;
+    border: 1px solid #344357;
+    border-radius: 6px;
+
+    color: #dce6f3;
+    font-size: 10px;
+    font-weight: 750;
+
+    box-shadow: none;
+
+    transition: .14s ease;
+}
+
+.surge-save-button:hover {
+    background: #233044;
+    border-color: #4b6280;
+
+    filter: none;
+    box-shadow: none;
+}
+
+.surge-save-button:active {
+    transform: translateY(1px);
+}
+
+.surge-setting-box .surge-save-button {
+    margin-top: 10px;
+}
+
+
+/* ============================================================
+   SUBSECTIONS
+   ============================================================ */
+
+.surge-subsection {
+    margin: 0;
+    padding: 18px 20px;
+
+    border-top: 1px solid var(--v3-line);
+}
+
+.surge-subtitle {
+    margin-bottom: 12px;
+
+    color: #e9eef5;
+    font-size: 13px;
+    font-weight: 750;
+}
+
+
+/* ============================================================
+   STAGES
+   ============================================================ */
+
+.surge-stage-grid {
+    grid-template-columns:
+        repeat(5, minmax(120px, 1fr));
+
+    gap: 8px;
+}
+
+.surge-stage-card {
+    padding: 12px;
+
+    background: #101720;
+    border: 1px solid #222d3a;
+    border-radius: 7px;
+
+    transition:
+        background .14s ease,
+        border-color .14s ease;
+}
+
+.surge-stage-card:hover {
+    background: #141d28;
+    border-color: #35455a;
+}
+
+.surge-stage-title {
+    margin-bottom: 8px;
+
+    color: #dfe6ee;
+    font-size: 11px;
+    font-weight: 750;
+}
+
+.surge-global-checkbox {
+    gap: 5px;
+    margin: 8px 0;
+
+    color: #758295;
+    font-size: 9px;
+}
+
+.surge-global-checkbox input {
+    accent-color: var(--v3-blue);
+}
+
+.surge-stage-card .surge-save-button {
+    width: 100%;
+}
+
+
+/* ============================================================
+   SYMBOL TABLE
+   ============================================================ */
+
+.surge-symbol-heading {
+    align-items: flex-end;
+}
+
+.surge-symbol-heading .surge-subtitle {
+    margin-bottom: 2px;
+}
+
+.surge-table-wrap {
+    margin-top: 12px;
+
+    background: #0a0f15;
+    border: 1px solid #202a37;
+    border-radius: 8px;
+
+    overflow: auto;
+}
+
+.surge-table {
+    min-width: 900px;
+
+    background: transparent;
+
+    font-variant-numeric: tabular-nums;
+}
+
+.surge-table th,
+.surge-table td {
+    padding: 9px 12px;
+
+    border-bottom: 1px solid #18212c;
+}
+
+.surge-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+
+    background: #0b1017;
+
+    color: #657387;
+    font-size: 9px;
+    font-weight: 750;
+
+    letter-spacing: .25px;
+}
+
+.surge-table td {
+    color: #cbd4df;
+    font-size: 10px;
+}
+
+.surge-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, .012);
+}
+
+.surge-table tbody tr:hover {
+    background: rgba(59, 130, 246, .055);
+}
+
+.surge-symbol-input {
+    width: 92px;
+    min-width: 78px;
+
+    padding: 6px 8px;
+    margin: 0;
+
+    font-size: 10px;
+}
+
+.surge-table .surge-save-button {
+    padding: 6px 10px;
+}
+
+.surge-loading {
+    color: var(--v3-dim);
+}
+
+
+/* ===== MESSAGES ===== */
+
+.surge-message {
+    margin: 12px 20px 0;
+    padding: 9px 11px;
+
+    color: #70e2a8;
+    background: rgba(33, 208, 122, .08);
+    border: 1px solid rgba(33, 208, 122, .18);
+    border-radius: 6px;
+
+    font-size: 10px;
+}
+
+.surge-message-error,
+.error-message {
+    color: #ff8290;
+    background: rgba(255, 82, 99, .08);
+    border: 1px solid rgba(255, 82, 99, .18);
+}
+
+.success-message {
+    color: #70e2a8;
+    background: rgba(33, 208, 122, .08);
+    border: 1px solid rgba(33, 208, 122, .18);
+}
+
+.surge-symbol-message {
+    color: #5fd89a;
+    font-size: 9px;
+}
+
+.surge-symbol-message-error {
+    color: #ff7382;
+}
+
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+
+.login-card {
+    background: var(--v3-panel);
+    border: 1px solid var(--v3-line);
+
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, .35);
+}
+
+
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #293544 #090d12;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #090d12;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #293544;
+    border: 2px solid #090d12;
+    border-radius: 20px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #3b4a5e;
+}
+
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 1050px) {
+    .container {
+        width: calc(100% - 32px);
+    }
+
+    .surge-stage-grid {
+        grid-template-columns:
+            repeat(3, minmax(120px, 1fr));
+    }
+}
+
+@media (max-width: 750px) {
+    .container {
+        width: calc(100% - 22px);
+        margin-top: 18px;
+    }
+
+    .wallet-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .surge-setting-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .surge-stage-grid {
+        grid-template-columns:
+            repeat(2, minmax(120px, 1fr));
+    }
+
+    .surge-header {
+        padding: 15px;
+    }
+
+    .surge-setting-grid,
+    .surge-subsection {
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+}
+
+@media (max-width: 430px) {
+    .container {
+        width: calc(100% - 16px);
+    }
+
+    .wallet-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+    }
+
+    .wallet-card {
+        min-height: 92px;
+        padding: 13px;
+    }
+
+    .wallet-card strong {
+        font-size: 16px;
+    }
+
+    .surge-header {
+        align-items: flex-start;
+        flex-direction: row;
+        gap: 10px;
+    }
+
+    .surge-stage-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+/* ============================================================
+   WARM GOLD DARK PALETTE - FINAL OVERRIDE
+   ============================================================ */
+
+:root {
+    --warm-bg: #080909;
+    --warm-panel: #0e1010;
+    --warm-panel-2: #121414;
+    --warm-panel-3: #171918;
+
+    --warm-line: #292a26;
+    --warm-line-soft: #1d1f1d;
+
+    --warm-text: #eee9d7;
+    --warm-text-strong: #fff4c7;
+    --warm-muted: #aaa58f;
+    --warm-dim: #777568;
+
+    --warm-gold: #d9b85f;
+    --warm-gold-bright: #efd783;
+    --warm-gold-soft: rgba(217, 184, 95, .10);
+
+    --warm-green: #79d6a3;
+    --warm-red: #e78383;
+    --warm-orange: #e2a75f;
+}
+
+
+/* ---------- page ---------- */
+
+html,
+body {
+    background: var(--warm-bg);
+    color: var(--warm-text);
+}
+
+body {
+    background:
+        radial-gradient(
+            circle at 50% -280px,
+            rgba(217, 184, 95, .055),
+            transparent 520px
+        ),
+        var(--warm-bg);
+}
+
+::selection {
+    background: rgba(217, 184, 95, .25);
+}
+
+
+/* ---------- top ---------- */
+
+.topbar {
+    background: rgba(8, 9, 9, .96);
+    border-bottom-color: var(--warm-line);
+}
+
+.brand {
+    color: var(--warm-text-strong);
+}
+
+.username,
+.subtext {
+    color: var(--warm-muted);
+}
+
+.logout-button {
+    background: #141615;
+    border-color: #34342e;
+    color: #c8c2a9;
+}
+
+.logout-button:hover {
+    background: #1c1e1b;
+    border-color: #5c5745;
+    color: #f4e8b9;
+}
+
+.section-title {
+    color: var(--warm-text-strong);
+}
+
+
+/* ---------- wallet ---------- */
+
+.wallet-card {
+    background:
+        linear-gradient(
+            145deg,
+            #141615,
+            #0e1010
+        );
+
+    border-color: var(--warm-line);
+}
+
+.wallet-card::before {
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            rgba(217, 184, 95, .65),
+            transparent
+        );
+}
+
+.wallet-card:hover {
+    background:
+        linear-gradient(
+            145deg,
+            #191b19,
+            #111311
+        );
+
+    border-color: #4b493d;
+}
+
+.wallet-card span {
+    color: var(--warm-muted);
+}
+
+.wallet-card strong {
+    color: var(--warm-text-strong);
+}
+
+.wallet-card small {
+    color: var(--warm-dim);
+}
+
+
+/* Wallet values */
+
+#wallet-equity {
+    color: #f1dda0;
+}
+
+#wallet-wallet {
+    color: #e9d38e;
+}
+
+#wallet-available {
+    color: #9bd6ae;
+}
+
+#wallet-unrealised {
+    color: #e5c678;
+}
+
+
+/* ---------- positions ---------- */
+
+.position-details {
+    background: var(--warm-panel);
+    border-color: var(--warm-line);
+}
+
+.position-details-title {
+    color: #f0dfa7;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(217, 184, 95, .075),
+            transparent 45%
+        );
+
+    border-bottom-color: var(--warm-line);
+}
+
+.position-table th {
+    background: #0b0d0c;
+    color: #8e8977;
+    border-bottom-color: var(--warm-line);
+}
+
+.position-table td {
+    color: #ddd6bd;
+    border-bottom-color: var(--warm-line-soft);
+}
+
+.position-table td:first-child {
+    color: #f0dda2;
+    font-weight: 700;
+}
+
+.position-table tbody tr:hover {
+    background: rgba(217, 184, 95, .04);
+}
+
+.position-long,
+.position-profit {
+    color: var(--warm-green) !important;
+}
+
+.position-short,
+.position-loss {
+    color: var(--warm-red) !important;
+}
+
+
+/* ---------- surge panel ---------- */
+
+.surge-settings-card {
+    background:
+        linear-gradient(
+            180deg,
+            #101211,
+            #0c0e0d
+        );
+
+    border-color: var(--warm-line);
+}
+
+.surge-description,
+.surge-help {
+    color: var(--warm-muted);
+}
+
+
+/* ---------- switch ---------- */
+
+.surge-switch-slider {
+    background: #34352f;
+    border-color: #48483e;
+}
+
+.surge-switch-slider::after {
+    background: #d9d3bd;
+}
+
+.surge-switch input:checked + .surge-switch-slider {
+    background: #b89646;
+    border-color: #d0ad55;
+
+    box-shadow:
+        0 0 0 3px rgba(217, 184, 95, .09),
+        0 0 14px rgba(217, 184, 95, .16);
+}
+
+.surge-switch input:checked + .surge-switch-slider::after {
+    background: #fff3c7;
+}
+
+.surge-switch strong {
+    color: #d4c99f;
+}
+
+
+/* ---------- setting cards ---------- */
+
+.surge-setting-box {
+    background:
+        linear-gradient(
+            145deg,
+            #161817,
+            #111312
+        );
+
+    border-color: #292b27;
+}
+
+.surge-setting-box:hover {
+    border-color: #4d493a;
+}
+
+.surge-setting-box label {
+    color: #e7dfc6;
+}
+
+
+/* ---------- inputs ---------- */
+
+input {
+    background: #0a0c0b;
+    border-color: #34362f;
+    color: #f1e8ce;
+}
+
+input:hover {
+    border-color: #575343;
+}
+
+input:focus {
+    background: #0d0f0e;
+    border-color: var(--warm-gold);
+
+    box-shadow:
+        0 0 0 2px rgba(217, 184, 95, .10);
+}
+
+.percent-input span {
+    color: #a9a28b;
+}
+
+
+/* ---------- buttons ---------- */
+
+.surge-save-button,
+.login-card button,
+.seed-form button {
+    background:
+        linear-gradient(
+            180deg,
+            #d2b35f,
+            #aa8c3e
+        );
+
+    border-color: #d5b961;
+    color: #17150e;
+
+    box-shadow:
+        0 3px 10px rgba(217, 184, 95, .12);
+}
+
+.surge-save-button:hover,
+.login-card button:hover,
+.seed-form button:hover {
+    background:
+        linear-gradient(
+            180deg,
+            #e2c570,
+            #b99a48
+        );
+
+    box-shadow:
+        0 5px 16px rgba(217, 184, 95, .18);
+}
+
+
+/* ---------- stage ---------- */
+
+.surge-subsection {
+    border-top-color: var(--warm-line);
+}
+
+.surge-subtitle {
+    color: #eee4c8;
+}
+
+.surge-stage-card {
+    background: #121413;
+    border-color: #292b27;
+}
+
+.surge-stage-card:hover {
+    background: #171917;
+    border-color: #494638;
+}
+
+.surge-stage-title {
+    color: #e9dfc3;
+}
+
+.surge-global-checkbox {
+    color: #99937e;
+}
+
+.surge-global-checkbox input {
+    accent-color: var(--warm-gold);
+}
+
+
+/* ---------- symbol table ---------- */
+
+.surge-table-wrap {
+    background: #0b0d0c;
+    border-color: var(--warm-line);
+}
+
+.surge-table th {
+    background: #090b0a;
+    color: #817d6e;
+    border-bottom-color: var(--warm-line);
+}
+
+.surge-table td {
+    color: #d8d1ba;
+    border-bottom-color: var(--warm-line-soft);
+}
+
+.surge-table td:first-child {
+    color: #ead99f;
+    font-weight: 700;
+}
+
+.surge-table tbody tr:nth-child(even) {
+    background: rgba(255, 244, 199, .012);
+}
+
+.surge-table tbody tr:hover {
+    background: rgba(217, 184, 95, .045);
+}
+
+
+/* ---------- messages ---------- */
+
+.surge-symbol-message,
+.success-message,
+.surge-message {
+    color: #8cdaad;
+}
+
+.surge-symbol-message-error,
+.error-message,
+.surge-message-error {
+    color: #eb8b8b;
+}
+
+
+/* ---------- login ---------- */
+
+.login-card {
+    background: var(--warm-panel);
+    border-color: var(--warm-line);
+}
+
+
+/* ---------- scrollbar ---------- */
+
+* {
+    scrollbar-color: #3d3b31 #090a09;
+}
+
+::-webkit-scrollbar-track {
+    background: #090a09;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #3d3b31;
+    border-color: #090a09;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #57513d;
+}
+
+
+
+/* ============================================================
+   WARM GOLD DETAIL TUNE
+   dark outline buttons + dynamic wallet UPL
+   ============================================================ */
+
+
+/* ---------- save buttons: dark + gold outline ---------- */
+
+.surge-save-button {
+    background:
+        linear-gradient(
+            180deg,
+            #171814,
+            #10110f
+        ) !important;
+
+    border: 1px solid #8f793d !important;
+
+    color: #e6cf84 !important;
+
+    box-shadow:
+        inset 0 1px 0 rgba(255, 244, 199, .025),
+        0 2px 8px rgba(0, 0, 0, .18) !important;
+}
+
+.surge-save-button:hover {
+    background:
+        linear-gradient(
+            180deg,
+            #201f18,
+            #151510
+        ) !important;
+
+    border-color: #d9b85f !important;
+
+    color: #fff0b4 !important;
+
+    box-shadow:
+        0 0 0 1px rgba(217, 184, 95, .06),
+        0 4px 14px rgba(217, 184, 95, .10) !important;
+}
+
+.surge-save-button:active {
+    background: #0d0e0c !important;
+
+    transform: translateY(1px);
+}
+
+
+/* Symbol table buttons stay compact */
+
+.surge-table .surge-save-button {
+    background: #151612 !important;
+    border-color: #625735 !important;
+    color: #d8c580 !important;
+
+    box-shadow: none !important;
+}
+
+.surge-table .surge-save-button:hover {
+    background: #1d1d17 !important;
+    border-color: #a58b45 !important;
+    color: #f0dda0 !important;
+}
+
+
+/* ---------- Wallet Unrealised PnL ---------- */
+
+#wallet-unrealised {
+    transition:
+        color .18s ease,
+        text-shadow .18s ease;
+}
+
+#wallet-unrealised.wallet-pnl-profit {
+    color: #79d6a3 !important;
+
+    text-shadow:
+        0 0 12px rgba(121, 214, 163, .10);
+}
+
+#wallet-unrealised.wallet-pnl-loss {
+    color: #e78383 !important;
+
+    text-shadow:
+        0 0 12px rgba(231, 131, 131, .10);
+}
+
+#wallet-unrealised.wallet-pnl-flat {
+    color: #efd783 !important;
+
+    text-shadow: none;
+}

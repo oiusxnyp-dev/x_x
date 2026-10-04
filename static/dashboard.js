@@ -14,6 +14,89 @@
         }
     }
 
+    function renderPositions(positions) {
+        const body =
+            document.getElementById("position-body");
+
+        if (!body) {
+            return;
+        }
+
+        body.innerHTML = "";
+
+        if (!positions || positions.length === 0) {
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+
+            cell.colSpan = 6;
+            cell.className = "position-empty";
+            cell.textContent = "현재 보유 포지션이 없습니다.";
+
+            row.appendChild(cell);
+            body.appendChild(row);
+            return;
+        }
+
+        for (const position of positions) {
+            const row = document.createElement("tr");
+
+            const values = [
+                position.symbol ?? "-",
+                position.side === "Buy"
+                    ? "LONG"
+                    : position.side === "Sell"
+                        ? "SHORT"
+                        : position.side ?? "-",
+                position.size ?? "-",
+                position.avgPrice ?? "-",
+                position.lastPrice ?? "-",
+                position.unrealisedPnl ?? "-",
+            ];
+
+            values.forEach((value, index) => {
+                const cell =
+                    document.createElement("td");
+
+                cell.textContent = value;
+
+                if (index === 1) {
+                    if (position.side === "Buy") {
+                        cell.className =
+                            "position-side position-long";
+                    } else if (
+                        position.side === "Sell"
+                    ) {
+                        cell.className =
+                            "position-side position-short";
+                    }
+                }
+
+                if (index === 5) {
+                    const pnl = Number(
+                        position.unrealisedPnl
+                    );
+
+                    if (Number.isFinite(pnl)) {
+                        if (pnl > 0) {
+                            cell.className =
+                                "position-pnl position-profit";
+                        } else if (pnl < 0) {
+                            cell.className =
+                                "position-pnl position-loss";
+                        } else {
+                            cell.className =
+                                "position-pnl";
+                        }
+                    }
+                }
+
+                row.appendChild(cell);
+            });
+
+            body.appendChild(row);
+        }
+    }
+
     function connect() {
         const protocol =
             window.location.protocol === "https:"
@@ -57,6 +140,47 @@
                 "wallet-unrealised",
                 data.unrealised
             );
+
+            const walletUnrealised =
+                document.getElementById(
+                    "wallet-unrealised"
+                );
+
+            if (walletUnrealised) {
+                const upl =
+                    Number(data.unrealised);
+
+                walletUnrealised.classList.remove(
+                    "wallet-pnl-profit",
+                    "wallet-pnl-loss",
+                    "wallet-pnl-flat"
+                );
+
+                if (Number.isFinite(upl)) {
+                    if (upl > 0) {
+                        walletUnrealised.classList.add(
+                            "wallet-pnl-profit"
+                        );
+                    } else if (upl < 0) {
+                        walletUnrealised.classList.add(
+                            "wallet-pnl-loss"
+                        );
+                    } else {
+                        walletUnrealised.classList.add(
+                            "wallet-pnl-flat"
+                        );
+                    }
+                } else {
+                    walletUnrealised.classList.add(
+                        "wallet-pnl-flat"
+                    );
+                }
+            }
+
+            renderPositions(
+                data.positions || []
+            );
+
         });
 
         socket.addEventListener("close", () => {

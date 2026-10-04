@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Closed PNL</title>
+    <title>Surge Trading Room</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 
@@ -11,7 +11,7 @@
 
 <header class="topbar">
     <div>
-        <div class="brand">Closed PNL</div>
+        <div class="brand">Surge Trading Room</div>
         <div class="username">
             {{ user["username"] }}
         </div>
@@ -66,6 +66,38 @@
             </div>
 
         </div>
+
+        <div class="position-details">
+            <div class="position-details-title">
+                Open Positions
+            </div>
+
+            <div class="position-table-wrap">
+                <table class="position-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Size</th>
+                            <th>Avg Price</th>
+                            <th>Last Price</th>
+                            <th>Unrealised PnL</th>
+                        </tr>
+                    </thead>
+                    <tbody id="position-body">
+                        <tr>
+                            <td
+                                colspan="6"
+                                class="position-empty"
+                            >
+                                포지션 정보를 기다리는 중...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
 
         {% endif %}
     </section>
