@@ -75,12 +75,28 @@ class RealtimeState:
                 state["positions"].pop(key, None)
                 return
 
+            existing = state["positions"].get(
+                key,
+                {},
+            )
+
+            side = p.get("side")
+            avg_price = p.get("avgPrice")
+
             state["positions"][key] = {
                 "symbol": symbol,
                 "positionIdx": position_idx,
-                "side": str(p.get("side") or ""),
+                "side": (
+                    str(side)
+                    if side not in (None, "")
+                    else existing.get("side", "")
+                ),
                 "size": str(size),
-                "avgPrice": str(p.get("avgPrice") or "0"),
+                "avgPrice": (
+                    str(avg_price)
+                    if avg_price not in (None, "", "0")
+                    else existing.get("avgPrice", "0")
+                ),
             }
 
     def set_price(self, user_id, symbol, price):
