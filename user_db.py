@@ -1,5 +1,6 @@
 import sqlite3
 import hashlib
+from contextlib import closing
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
 import secrets
@@ -19,7 +20,7 @@ def get_db():
 
 
 def init_db():
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +68,7 @@ def create_user(username, password):
     salt = "argon2"
 
     try:
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             conn.execute(
                 """
                 INSERT INTO users (
@@ -99,7 +100,7 @@ def create_user(username, password):
 
 
 def authenticate_user(username, password):
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         user = conn.execute(
             """
             SELECT *
@@ -123,7 +124,7 @@ def authenticate_user(username, password):
 
         if _password_hasher.check_needs_rehash(stored_hash):
             new_hash = _password_hasher.hash(password)
-            with get_db() as conn:
+            with closing(get_db()) as conn, conn:
                 conn.execute(
                     """
                     UPDATE users
@@ -150,7 +151,7 @@ def authenticate_user(username, password):
         # migrate this account to Argon2id.
         new_hash = _password_hasher.hash(password)
 
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             conn.execute(
                 """
                 UPDATE users
@@ -165,7 +166,7 @@ def authenticate_user(username, password):
     return dict(user)
 
 def get_user_by_id(user_id):
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         user = conn.execute(
             """
             SELECT
@@ -187,7 +188,7 @@ def get_user_by_id(user_id):
 
 
 def get_users():
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         rows = conn.execute(
             """
             SELECT
@@ -205,7 +206,7 @@ def get_users():
 
 
 def approve_user(user_id):
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         conn.execute(
             """
             UPDATE users
@@ -219,7 +220,7 @@ def approve_user(user_id):
 
 
 def set_user_enabled(user_id, enabled):
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         conn.execute(
             """
             UPDATE users

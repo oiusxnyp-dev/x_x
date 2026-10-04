@@ -70,50 +70,6 @@
         {% endif %}
     </section>
 
-
-    <section class="settings-card">
-
-        <div class="section-title">
-            매매 설정
-        </div>
-
-        {% if saved %}
-        <div class="success-message">
-            비중을 저장했습니다.
-        </div>
-        {% endif %}
-
-        <form
-            method="post"
-            action="/settings/seed"
-            class="seed-form"
-        >
-            <label for="seed_percent">
-                진입 비중
-            </label>
-
-            <div class="percent-input">
-                <input
-                    id="seed_percent"
-                    name="seed_percent"
-                    type="number"
-                    min="0"
-                    max="1000"
-                    step="0.1"
-                    value="{{ seed_percent }}"
-                    required
-                >
-                <span>%</span>
-            </div>
-
-            <button type="submit">
-                저장
-            </button>
-        </form>
-
-    </section>
-
-
     <section class="surge-settings-card">
         <div class="surge-header">
             <div>

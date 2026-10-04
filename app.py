@@ -59,36 +59,6 @@ templates = Jinja2Templates(
 )
 
 
-def get_seed_percent(user_id: int) -> float:
-    with sqlite3.connect(DB_FILE) as con:
-        row = con.execute(
-            """
-            SELECT seed_percent
-            FROM users
-            WHERE id = ?
-            """,
-            (user_id,),
-        ).fetchone()
-
-    if row is None:
-        raise RuntimeError("user not found")
-
-    return float(row[0])
-
-
-def set_seed_percent(user_id: int, value: float) -> None:
-    with sqlite3.connect(DB_FILE) as con:
-        con.execute(
-            """
-            UPDATE users
-            SET seed_percent = ?
-            WHERE id = ?
-            """,
-            (value, user_id),
-        )
-        con.commit()
-
-
 def get_wallet_sync(user_id: int):
     session = get_session(user_id)
 
@@ -209,8 +179,6 @@ async def dashboard(request: Request):
         wallet = None
         wallet_error = str(exc)
 
-    seed_percent = get_seed_percent(user_id)
-
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -218,42 +186,8 @@ async def dashboard(request: Request):
             "user": user,
             "wallet": wallet,
             "wallet_error": wallet_error,
-            "seed_percent": seed_percent,
-            "saved": request.query_params.get("saved") == "1",
         },
     )
-
-
-@app.post("/settings/seed")
-async def save_seed(
-    request: Request,
-    seed_percent: float = Form(...),
-):
-    user = current_user(request)
-
-    if not user:
-        return RedirectResponse(
-            "/login",
-            status_code=303,
-        )
-
-    # 실수로 음수/비정상적으로 큰 값을 저장하지 않도록 제한.
-    if seed_percent < 0 or seed_percent > 1000:
-        return RedirectResponse(
-            "/?saved=invalid",
-            status_code=303,
-        )
-
-    set_seed_percent(
-        int(user["id"]),
-        seed_percent,
-    )
-
-    return RedirectResponse(
-        "/?saved=1",
-        status_code=303,
-    )
-
 
 
 @app.get("/api/surge/settings")

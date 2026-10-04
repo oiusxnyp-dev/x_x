@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+from contextlib import closing
 
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
@@ -20,7 +21,7 @@ cipher = Fernet(key.encode())
 
 
 def get_bybit_credentials(user_id):
-    with sqlite3.connect(DB_FILE) as con:
+    with closing(sqlite3.connect(DB_FILE)) as con, con:
         con.row_factory = sqlite3.Row
 
         row = con.execute("""
