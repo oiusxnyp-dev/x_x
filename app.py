@@ -238,7 +238,7 @@ async def save_seed(
         )
 
     # 실수로 음수/비정상적으로 큰 값을 저장하지 않도록 제한.
-    if seed_percent < 0 or seed_percent > 100:
+    if seed_percent < 0 or seed_percent > 1000:
         return RedirectResponse(
             "/?saved=invalid",
             status_code=303,
