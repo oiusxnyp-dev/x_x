@@ -362,7 +362,7 @@ def telegram_reader_trading_enabled(user_id: int) -> bool:
 
     uri = f"file:{TELEGRAM_USERS_DB}?mode=ro"
 
-    with sqlite3.connect(uri, uri=True) as con:
+    with closing(sqlite3.connect(uri, uri=True)) as con, con:
         row = con.execute("""
             SELECT trading_enabled
             FROM users
@@ -471,7 +471,7 @@ def get_recent_surge_messages(limit: int = 20):
 
     uri = f"file:{TELEGRAM_RAW_DB}?mode=ro"
 
-    with sqlite3.connect(uri, uri=True) as con:
+    with closing(sqlite3.connect(uri, uri=True)) as con, con:
         con.row_factory = sqlite3.Row
 
         rows = con.execute("""
@@ -1109,7 +1109,7 @@ def _read_historical_surge_rows():
 
     uri = f"file:{SURGE_ARCHIVE_DB}?mode=ro"
 
-    with sqlite3.connect(uri, uri=True) as con:
+    with closing(sqlite3.connect(uri, uri=True)) as con, con:
         con.row_factory = sqlite3.Row
 
         rows = con.execute("""
@@ -1154,7 +1154,7 @@ def _read_live_surge_rows():
 
     uri = f"file:{TELEGRAM_RAW_DB}?mode=ro"
 
-    with sqlite3.connect(uri, uri=True) as con:
+    with closing(sqlite3.connect(uri, uri=True)) as con, con:
         con.row_factory = sqlite3.Row
 
         rows = con.execute("""
