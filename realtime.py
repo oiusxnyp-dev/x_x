@@ -170,34 +170,18 @@ class RealtimeState:
                 ),
             })
 
-        # Dashboard Equity도 Unrealised PnL과 동일하게
-        # Redis Bybit WS lastPrice 기준으로 표시한다.
+        # 상단 계좌 정보는 Bybit wallet 원본을 그대로 사용한다.
         #
-        # wallet["wallet"] = Bybit totalWalletBalance
-        # display equity   = wallet balance + lastPrice UPL
-        wallet_balance_text = wallet.get("wallet")
-
-        if (
-            not missing_lastprice
-            and wallet_balance_text not in (None, "")
-        ):
-            wallet_balance = Decimal(
-                str(wallet_balance_text)
-            )
-
-            wallet["equity"] = str(
-                wallet_balance + total_upl
-            )
-            wallet["unrealised"] = str(total_upl)
-
-            display_unrealised = str(total_upl)
-        else:
-            # Redis lastPrice가 하나라도 없으면
-            # 불완전한 합계를 표시하지 않고
-            # Bybit wallet 값을 그대로 유지한다.
-            display_unrealised = wallet.get(
-                "unrealised"
-            )
+        # equity     = Bybit totalEquity
+        # wallet     = Bybit totalWalletBalance
+        # available  = Bybit totalAvailableBalance
+        # unrealised = Bybit totalPerpUPL
+        #
+        # ticker 기반 계산값은 아래 position별
+        # lastPrice / unrealisedPnl 표시에만 사용한다.
+        display_unrealised = wallet.get(
+            "unrealised"
+        )
 
         return {
             "wallet": wallet,

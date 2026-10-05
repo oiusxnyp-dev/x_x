@@ -110,6 +110,37 @@ class BybitRealtime:
                     f"Bybit session unavailable user_id={self.user_id}"
                 )
 
+            wallet_result = session.get_wallet_balance(
+                accountType="UNIFIED",
+            )
+
+            wallet_rows = (
+                wallet_result
+                .get("result", {})
+                .get("list", [])
+            )
+
+            if wallet_rows:
+                wallet = wallet_rows[0]
+
+                realtime.set_wallet(
+                    self.user_id,
+                    {
+                        "equity": wallet.get(
+                            "totalEquity"
+                        ),
+                        "wallet": wallet.get(
+                            "totalWalletBalance"
+                        ),
+                        "available": wallet.get(
+                            "totalAvailableBalance"
+                        ),
+                        "unrealised": wallet.get(
+                            "totalPerpUPL"
+                        ),
+                    },
+                )
+
             result = session.get_positions(
                 category="linear",
                 settleCoin="USDT",
