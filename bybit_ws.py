@@ -26,6 +26,11 @@ class BybitRealtime:
         self._position_reconcile_timer = None
         self._position_reconcile_lock = threading.RLock()
 
+        # Private position WS 이벤트를 놓쳐도 stale position이
+        # 영구히 남지 않도록 REST를 최종 원본으로 주기 동기화한다.
+        self._position_reconcile_interval = 5.0
+        self._position_reconcile_thread = None
+
     def bootstrap(self):
         session = get_session(self.user_id)
 
@@ -117,13 +122,6 @@ class BybitRealtime:
                 positions,
             )
 
-            print(
-                "[BYBIT POSITION RECONCILE] "
-                f"user_id={self.user_id} "
-                f"positions={sum(1 for p in positions if float(p.get('size') or 0) > 0)}",
-                flush=True,
-            )
-
         except Exception as exc:
             print(
                 "[BYBIT POSITION RECONCILE] "
@@ -131,6 +129,35 @@ class BybitRealtime:
                 f"error={exc}",
                 flush=True,
             )
+
+    def _position_reconcile_loop(self):
+        while True:
+            time.sleep(self._position_reconcile_interval)
+
+            self._reconcile_positions_from_rest()
+
+    def _start_position_reconcile_loop(self):
+        if (
+            self._position_reconcile_thread is not None
+            and self._position_reconcile_thread.is_alive()
+        ):
+            return
+
+        thread = threading.Thread(
+            target=self._position_reconcile_loop,
+            name=f"bybit-position-reconcile-{self.user_id}",
+            daemon=True,
+        )
+
+        self._position_reconcile_thread = thread
+        thread.start()
+
+        print(
+            "[BYBIT POSITION RECONCILE] "
+            f"user_id={self.user_id} "
+            f"periodic={self._position_reconcile_interval}s started",
+            flush=True,
+        )
 
     def _schedule_position_reconcile(self):
         with self._position_reconcile_lock:
@@ -259,6 +286,7 @@ class BybitRealtime:
             )
 
             self._ensure_tickers()
+            self._start_position_reconcile_loop()
 
             self._started = True
 
