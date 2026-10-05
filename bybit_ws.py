@@ -20,6 +20,12 @@ class BybitRealtime:
         self._started = False
         self._lock = threading.RLock()
 
+        # Position WS는 빠른 화면 갱신용으로 사용하고,
+        # 최종 size / side / avgPrice는 Bybit REST와 재동기화한다.
+        # 연속 체결 시 REST 호출이 폭증하지 않도록 debounce한다.
+        self._position_reconcile_timer = None
+        self._position_reconcile_lock = threading.RLock()
+
     def bootstrap(self):
         session = get_session(self.user_id)
 
@@ -87,6 +93,61 @@ class BybitRealtime:
             },
         )
 
+    def _reconcile_positions_from_rest(self):
+        with self._position_reconcile_lock:
+            self._position_reconcile_timer = None
+
+        try:
+            session = get_session(self.user_id)
+
+            if session is None:
+                raise RuntimeError(
+                    f"Bybit session unavailable user_id={self.user_id}"
+                )
+
+            result = session.get_positions(
+                category="linear",
+                settleCoin="USDT",
+            )
+
+            positions = result["result"]["list"]
+
+            realtime.replace_positions(
+                self.user_id,
+                positions,
+            )
+
+            print(
+                "[BYBIT POSITION RECONCILE] "
+                f"user_id={self.user_id} "
+                f"positions={sum(1 for p in positions if float(p.get('size') or 0) > 0)}",
+                flush=True,
+            )
+
+        except Exception as exc:
+            print(
+                "[BYBIT POSITION RECONCILE] "
+                f"user_id={self.user_id} "
+                f"error={exc}",
+                flush=True,
+            )
+
+    def _schedule_position_reconcile(self):
+        with self._position_reconcile_lock:
+            timer = self._position_reconcile_timer
+
+            if timer is not None:
+                timer.cancel()
+
+            timer = threading.Timer(
+                0.5,
+                self._reconcile_positions_from_rest,
+            )
+            timer.daemon = True
+
+            self._position_reconcile_timer = timer
+            timer.start()
+
     def _on_position(self, message):
         for p in message.get("data") or []:
             if p.get("category") not in (None, "linear"):
@@ -98,6 +159,7 @@ class BybitRealtime:
             )
 
         self._ensure_tickers()
+        self._schedule_position_reconcile()
 
     def _on_ticker(self, message):
         topic = str(message.get("topic") or "")
