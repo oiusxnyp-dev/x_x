@@ -262,9 +262,9 @@ def save_symbol_entry_percent(
 
     value = float(entry_percent)
 
-    if value < 0 or value > 1000:
+    if value < 0 or value > 5000:
         raise ValueError(
-            "entry_percent must be 0..1000"
+            "entry_percent must be 0..5000"
         )
 
     now = time.time()
@@ -410,9 +410,9 @@ def save_settings(
 ):
     entry_percent = float(entry_percent)
 
-    if entry_percent < 0 or entry_percent > 1000:
+    if entry_percent < 0 or entry_percent > 5000:
         raise ValueError(
-            "entry_percent must be between 0 and 1000"
+            "entry_percent must be between 0 and 5000"
         )
 
     # ON 요청일 때 Telegram Reader 상태를 반드시 원본 DB에서 검사.
@@ -632,9 +632,9 @@ def set_stage_percent(
     if stage < 1:
         raise ValueError("stage must be >= 1")
 
-    if entry_percent < 0 or entry_percent > 1000:
+    if entry_percent < 0 or entry_percent > 5000:
         raise ValueError(
-            "entry_percent must be between 0 and 1000"
+            "entry_percent must be between 0 and 5000"
         )
 
     init_stage_tables()
@@ -722,9 +722,9 @@ def save_stage_entry_setting(
 
     value = float(entry_percent)
 
-    if value < 0 or value > 1000:
+    if value < 0 or value > 5000:
         raise ValueError(
-            "entry_percent must be 0..1000"
+            "entry_percent must be 0..5000"
         )
 
     with closing(sqlite3.connect(SETTINGS_DB)) as con, con:

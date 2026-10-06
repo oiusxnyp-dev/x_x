@@ -342,10 +342,10 @@ async def surge_global_api(
             "error": "not_authenticated",
         }
 
-    if entry_percent < 0 or entry_percent > 1000:
+    if entry_percent < 0 or entry_percent > 5000:
         return {
             "ok": False,
-            "error": "entry_percent must be 0..1000",
+            "error": "entry_percent must be 0..5000",
         }
 
     user_id = int(user["id"])
@@ -441,10 +441,10 @@ async def surge_stage_api(
             "error": "stage must be >= 1",
         }
 
-    if entry_percent < 0 or entry_percent > 1000:
+    if entry_percent < 0 or entry_percent > 5000:
         return {
             "ok": False,
-            "error": "entry_percent must be 0..1000",
+            "error": "entry_percent must be 0..5000",
         }
 
     if use_global not in (0, 1):
@@ -510,11 +510,11 @@ async def surge_symbol_api(
         else:
             value = float(entry_percent)
 
-            if value < 0 or value > 1000:
+            if value < 0 or value > 5000:
                 return {
                     "ok": False,
                     "error":
-                        "entry_percent must be 0..1000",
+                        "entry_percent must be 0..5000",
                 }
 
         saved = save_symbol_entry_percent(

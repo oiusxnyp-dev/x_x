@@ -391,7 +391,7 @@
                         if (
                             !Number.isFinite(value) ||
                             value < 0 ||
-                            value > 1000
+                            value > 5000
                         ) {
                             throw new Error(
                                 "비중은 0~1000% 사이여야 합니다."
@@ -600,7 +600,7 @@
                             if (
                                 !Number.isFinite(value) ||
                                 value < 0 ||
-                                value > 1000
+                                value > 5000
                             ) {
                                 throw new Error(
                                     "종목 비중은 0~1000% 사이여야 합니다."
@@ -826,7 +826,7 @@
                         if (
                             !Number.isFinite(value) ||
                             value < 0 ||
-                            value > 1000
+                            value > 5000
                         ) {
                             throw new Error(
                                 "기본 비중은 0~1000% 사이여야 합니다."
