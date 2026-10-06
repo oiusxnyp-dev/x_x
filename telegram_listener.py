@@ -113,14 +113,16 @@ async def main():
             )
 
             # ------------------------------------------------
-            # Surge executor E2E DRY RUN
+            # Surge executor LIVE execution
             #
-            # 실제 주문 없음
-            # 레버리지 변경 없음
-            # execution claim 없음
+            # 현재 Oi 급등종목 전략은 LONG으로 실행한다.
+            # 각 eligible BYBIT user는 독립적으로 실행하며,
+            # 한 사용자의 실행 실패는 다른 사용자 실행을
+            # 중단시키지 않는다.
             #
-            # 현재 Oi 급등종목 전략은 LONG 경로만 검증한다.
-            # 실거래 전환은 별도 검증 후 한다.
+            # execute_surge_market_order()는 dry_run=False로
+            # 호출되므로 execution claim, leverage 적용,
+            # 최종 수량 검증 후 Market 주문을 실행한다.
             # ------------------------------------------------
 
             # ------------------------------------------------
