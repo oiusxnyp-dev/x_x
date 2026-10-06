@@ -197,15 +197,26 @@ async def main():
             )
 
             async def execute_for_user(uid):
-                return await asyncio.to_thread(
-                    execute_surge_market_order,
-                    user_id=uid,
-                    chat_id=CHAT_ID,
-                    message_id=int(event.id),
-                    symbol=symbol,
-                    side="LONG",
-                    dry_run=False,
-                )
+                try:
+                    return await asyncio.to_thread(
+                        execute_surge_market_order,
+                        user_id=uid,
+                        chat_id=CHAT_ID,
+                        message_id=int(event.id),
+                        symbol=symbol,
+                        side="LONG",
+                        dry_run=False,
+                    )
+                except Exception as exc:
+                    return {
+                        "ok": False,
+                        "dry_run": False,
+                        "executed": False,
+                        "reason": "USER_EXECUTION_EXCEPTION",
+                        "error": (
+                            f"{type(exc).__name__}: {exc}"
+                        ),
+                    }
 
             tasks = [
                 execute_for_user(uid)
