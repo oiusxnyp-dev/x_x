@@ -196,7 +196,8 @@ def get_users():
                 username,
                 approved,
                 enabled,
-                created_at
+                created_at,
+                exchange
             FROM users
             ORDER BY id DESC
             """
