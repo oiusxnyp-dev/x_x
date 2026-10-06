@@ -35,7 +35,9 @@ def extract_oi_symbol(text):
     """
     text = text or ""
 
-    if "oi급등종목" not in normalize(text):
+    # 반드시 메시지가 "Oi 급등종목"으로 시작해야 한다.
+    # 대소문자와 띄어쓰기 차이는 무시한다.
+    if not normalize(text).startswith("oi급등종목"):
         return None
 
     tags = re.findall(
