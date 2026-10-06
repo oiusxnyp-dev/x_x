@@ -323,6 +323,22 @@ def resolve_surge_entry_percent(
             "source": "symbol",
         }
 
+    # --------------------------------------------------------
+    # Stage 1 uses the global base entry percentage.
+    #
+    # A symbol-specific override still has the highest
+    # priority, but the first ordinary signal must preserve
+    # the original "base entry percentage" semantics.
+    # --------------------------------------------------------
+    if stage == 1:
+        settings = get_settings(uid)
+        return {
+            "entry_percent": float(
+                settings.get("entry_percent") or 0
+            ),
+            "source": "global",
+        }
+
     stage_settings = get_stage_settings(uid)
 
     exact = next(
@@ -2158,9 +2174,13 @@ def build_surge_entry_plan(
     signal_stage = max(1, signal_count)
 
     if entry_percent is None:
-        requested_percent = get_percent_for_stage(
+        resolved_percent = resolve_surge_entry_percent(
             user_id,
+            base_symbol,
             signal_stage,
+        )
+        requested_percent = float(
+            resolved_percent["entry_percent"]
         )
     else:
         requested_percent = float(
@@ -4507,6 +4527,20 @@ def execute_surge_market_order(
 
     final_plan = preview["final_plan"]
 
+    # --------------------------------------------------------
+    # Lock the signal decision made by the preview.
+    #
+    # signal_stage / entry_percent are properties of this
+    # Telegram signal and must not be resolved again during
+    # leverage / Available / price / qty recalculation.
+    # --------------------------------------------------------
+    locked_signal_stage = int(
+        final_plan["signal_stage"]
+    )
+    locked_entry_percent = float(
+        final_plan["entry_percent"]
+    )
+
     trading_symbol = final_plan[
         "trading_symbol"
     ]
@@ -4556,12 +4590,8 @@ def execute_surge_market_order(
         message_id,
         trading_symbol,
         side,
-        signal_stage=final_plan.get(
-            "signal_stage"
-        ),
-        entry_percent=final_plan.get(
-            "entry_percent"
-        ),
+        signal_stage=locked_signal_stage,
+        entry_percent=locked_entry_percent,
     )
 
     if not claim["claimed"]:
@@ -4593,7 +4623,7 @@ def execute_surge_market_order(
         prepared = prepare_surge_order_final(
             user_id,
             trading_symbol,
-            entry_percent=entry_percent,
+            entry_percent=locked_entry_percent,
             apply_leverage=True,
         )
 
