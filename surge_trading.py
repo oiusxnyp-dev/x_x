@@ -2275,9 +2275,7 @@ def get_symbol_order_info(
     instrument_refreshed = False
 
     if instrument is None:
-        refresh_instrument_cache(
-            user_id
-        )
+        refresh_instrument_cache()
 
         instrument_refreshed = True
 
@@ -5172,23 +5170,20 @@ def upsert_instrument_rows(rows):
     return count
 
 
-def refresh_instrument_cache(
-    user_id: int,
-):
+def refresh_instrument_cache():
     """
-    Bybit Linear instruments 전체 페이지를 읽어서
+    Bybit Linear public instruments 전체 페이지를 읽어서
     instruments.db에 UPSERT.
 
+    이 데이터는 계정별 데이터가 아니므로
+    회원 API credential/session에 의존하지 않는다.
     기존 행을 DELETE하지 않는다.
     """
-    from get_session import get_session
+    from pybit.unified_trading import HTTP
 
-    session = get_session(int(user_id))
-
-    if session is None:
-        raise RuntimeError(
-            f"Bybit session not found: user_id={user_id}"
-        )
+    session = HTTP(
+        testnet=False,
+    )
 
     cursor = None
     api_rows = 0
@@ -5244,7 +5239,6 @@ def refresh_instrument_cache(
 
 
 def resolve_surge_symbol_cached(
-    user_id: int,
     raw_symbol: str,
     *,
     refresh_on_miss: bool = True,
@@ -5365,9 +5359,7 @@ def resolve_surge_symbol_cached(
 
     # NO_MATCH만 신규상장 가능성을 고려하여
     # instruments API를 한 번 갱신한다.
-    refresh_instrument_cache(
-        user_id
-    )
+    refresh_instrument_cache()
 
     second = lookup()
     second["refreshed"] = True

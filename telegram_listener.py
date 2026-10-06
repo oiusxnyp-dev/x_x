@@ -76,7 +76,6 @@ async def main():
             print("raw symbol =", raw_symbol)
 
             resolution = resolve_surge_symbol_cached(
-                2,
                 raw_symbol,
             )
 
