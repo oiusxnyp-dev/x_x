@@ -4491,6 +4491,30 @@ def execute_surge_market_order(
     chat_id = int(chat_id or 0)
     message_id = int(message_id)
 
+    # --------------------------------------------------------
+    # Final execution interlock.
+    #
+    # Never rely only on the web/API toggle path. Every real
+    # execution must re-check the effective state immediately
+    # before entering the order execution flow.
+    #
+    # get_effective_settings() is fail-closed:
+    # - surge OFF                 -> blocked
+    # - Telegram Reader trading ON -> blocked
+    # - interlock DB/read error   -> blocked
+    # --------------------------------------------------------
+    if not dry_run:
+        effective = get_effective_settings(user_id)
+
+        if not effective.get("effective_enabled"):
+            return {
+                "ok": False,
+                "dry_run": False,
+                "executed": False,
+                "reason": "SURGE_AUTO_TRADING_DISABLED",
+                "settings": effective,
+            }
+
     side = str(side).upper().strip()
 
     if side == "LONG":
