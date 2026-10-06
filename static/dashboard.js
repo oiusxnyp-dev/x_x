@@ -334,7 +334,7 @@
             const input = document.createElement("input");
             input.type = "number";
             input.min = "0";
-            input.max = "1000";
+            input.max = "5000";
             input.step = "0.1";
             input.value = row.entry_percent;
 
@@ -394,7 +394,7 @@
                             value > 5000
                         ) {
                             throw new Error(
-                                "비중은 0~1000% 사이여야 합니다."
+                                "비중은 0~5000% 사이여야 합니다."
                             );
                         }
 
@@ -526,7 +526,7 @@
 
             input.type = "number";
             input.min = "0";
-            input.max = "1000";
+            input.max = "5000";
             input.step = "0.1";
             input.placeholder = "자동";
             input.className =
@@ -603,7 +603,7 @@
                                 value > 5000
                             ) {
                                 throw new Error(
-                                    "종목 비중은 0~1000% 사이여야 합니다."
+                                    "종목 비중은 0~5000% 사이여야 합니다."
                                 );
                             }
                         }
@@ -829,7 +829,7 @@
                             value > 5000
                         ) {
                             throw new Error(
-                                "기본 비중은 0~1000% 사이여야 합니다."
+                                "기본 비중은 0~5000% 사이여야 합니다."
                             );
                         }
 

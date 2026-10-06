@@ -1484,7 +1484,7 @@ def calculate_surge_entry_value(
     available = max(0.0, float(available))
     entry_percent = max(
         0.0,
-        min(1000.0, float(entry_percent)),
+        min(5000.0, float(entry_percent)),
     )
     max_leverage = max(
         0.0,
@@ -1632,7 +1632,7 @@ def calculate_risk_adjusted_entry(
 
     entry_percent = max(
         0.0,
-        min(1000.0, float(entry_percent)),
+        min(5000.0, float(entry_percent)),
     )
 
     existing_position_value = max(
