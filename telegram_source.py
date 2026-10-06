@@ -116,13 +116,37 @@ async def main():
             f"{CHANNEL_KEYWORD!r}"
         )
 
-    @client.on(
-        events.NewMessage(
-            chats=list(target_ids),
-        )
-    )
+    EDIT_MAX_AGE_SECONDS = 60
+
     async def handler(event):
         text = event.raw_text or ""
+
+        event_type = (
+            "EDIT"
+            if isinstance(event, events.MessageEdited.Event)
+            else "NEW"
+        )
+
+        if event_type == "EDIT":
+            message_date = event.date
+            edit_date = event.edit_date
+
+            if message_date and edit_date:
+                edit_age = (
+                    edit_date - message_date
+                ).total_seconds()
+
+                if edit_age > EDIT_MAX_AGE_SECONDS:
+                    print(
+                        "[OI EDIT SKIP]",
+                        "message_id =",
+                        event.id,
+                        "age_seconds =",
+                        edit_age,
+                        "reason = EDIT_TOO_OLD",
+                        flush=True,
+                    )
+                    return
 
         raw_symbol = extract_oi_symbol(text)
 
@@ -160,6 +184,7 @@ async def main():
         print()
         print("=" * 80)
         print("[OI -> REDIS]")
+        print("event_type =", event_type)
         print("stream_id =", stream_id)
         print("chat_id   =", chat_id)
         print(
@@ -169,6 +194,20 @@ async def main():
         print("message_id =", message_id)
         print("raw_symbol =", raw_symbol)
         print("=" * 80, flush=True)
+
+    client.add_event_handler(
+        handler,
+        events.NewMessage(
+            chats=list(target_ids),
+        ),
+    )
+
+    client.add_event_handler(
+        handler,
+        events.MessageEdited(
+            chats=list(target_ids),
+        ),
+    )
 
     await client.run_until_disconnected()
 
