@@ -1,9 +1,6 @@
 import asyncio
-import os
-import re
 
-from dotenv import load_dotenv
-from telethon import TelegramClient, events
+import redis
 
 from surge_trading import (
     execute_surge_market_order,
@@ -13,325 +10,282 @@ from surge_trading import (
 from user_db import get_users
 
 
-load_dotenv(".env")
-
-API_ID = int(os.environ["TG_API_ID"])
-API_HASH = os.environ["TG_API_HASH"]
-
-SESSION = "telegram_source"
-CHAT_ID = -1004442764226
+REDIS_HOST = "127.0.0.1"
+REDIS_PORT = 6379
+REDIS_STREAM = "surge:telegram:signals"
 
 
-def normalize(text):
-    return "".join((text or "").lower().split())
+async def process_signal(fields):
+    chat_id = int(fields["chat_id"])
+    message_id = int(fields["message_id"])
+    raw_symbol = (fields.get("raw_symbol") or "").strip().upper()
+    text = fields.get("text") or ""
+    chat_name = fields.get("chat_name") or ""
 
+    print()
+    print("=" * 80)
+    print("[REDIS TELEGRAM SIGNAL]")
+    print("chat_id    =", chat_id)
+    print("chat_name  =", chat_name)
+    print("message_id =", message_id)
+    print("-" * 80)
+    print(text)
 
-def extract_oi_symbol(text):
-    """
-    Oi 급등종목 메시지라면 마지막 해시태그를 반환.
-    아니면 None.
-    """
+    if not raw_symbol:
+        print("[SURGE SKIP] empty raw_symbol", flush=True)
+        print("=" * 80, flush=True)
+        return
 
-    text = text or ""
+    print()
+    print("[OI SIGNAL]")
+    print("raw symbol =", raw_symbol)
 
-    # 띄어쓰기 차이는 무시
-    if "oi급등종목" not in normalize(text):
-        return None
-
-    tags = re.findall(
-        r"#\s*([A-Za-z0-9_]+)",
-        text,
-        flags=re.I,
+    resolution = resolve_surge_symbol_cached(
+        raw_symbol,
     )
 
-    if not tags:
-        return None
+    print(
+        "resolved   =",
+        resolution.get("resolved"),
+    )
+    print(
+        "mode       =",
+        resolution.get("mode"),
+    )
+    print(
+        "candidates =",
+        resolution.get("candidates"),
+    )
+    print(
+        "refreshed  =",
+        resolution.get("refreshed"),
+    )
 
-    return tags[-1].upper()
+    if not resolution.get("resolved"):
+        print(
+            "[SURGE SKIP] symbol could not be resolved",
+            flush=True,
+        )
+        print("=" * 80, flush=True)
+        return
+
+    symbol = resolution["symbol"]
+
+    print("final      =", symbol)
+
+    target_users = []
+
+    for user in get_users():
+        uid = int(user["id"])
+
+        if not int(user["approved"]):
+            continue
+
+        if not int(user["enabled"]):
+            continue
+
+        if str(
+            user["exchange"] or ""
+        ).upper() != "BYBIT":
+            continue
+
+        try:
+            effective = get_effective_settings(uid)
+        except Exception as exc:
+            print(
+                "[SURGE USER SKIP]",
+                "user_id =",
+                uid,
+                "reason = EFFECTIVE_SETTINGS_ERROR",
+                "error =",
+                repr(exc),
+                flush=True,
+            )
+            continue
+
+        if not effective.get("effective_enabled"):
+            print(
+                "[SURGE USER SKIP]",
+                "user_id =",
+                uid,
+                "reason = AUTO_TRADING_DISABLED",
+                flush=True,
+            )
+            continue
+
+        target_users.append(uid)
+
+    print()
+    print(
+        "[SURGE FANOUT]",
+        "message_id =",
+        message_id,
+        "symbol =",
+        symbol,
+        "users =",
+        target_users,
+        flush=True,
+    )
+
+    async def execute_for_user(uid):
+        try:
+            return await asyncio.to_thread(
+                execute_surge_market_order,
+                user_id=uid,
+                chat_id=chat_id,
+                message_id=message_id,
+                symbol=symbol,
+                side="LONG",
+                dry_run=False,
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "dry_run": False,
+                "executed": False,
+                "reason": "USER_EXECUTION_EXCEPTION",
+                "error": (
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            }
+
+    tasks = [
+        execute_for_user(uid)
+        for uid in target_users
+    ]
+
+    results = await asyncio.gather(
+        *tasks,
+        return_exceptions=True,
+    )
+
+    for uid, result in zip(
+        target_users,
+        results,
+    ):
+        print()
+        print(
+            "[SURGE USER RESULT]",
+            "user_id =",
+            uid,
+            flush=True,
+        )
+
+        if isinstance(result, BaseException):
+            print(
+                "error      =",
+                repr(result),
+                flush=True,
+            )
+            continue
+
+        print("message_id =", message_id)
+        print("symbol     =", result.get("symbol"))
+        print("side       =", result.get("side"))
+        print("order_side =", result.get("order_side"))
+        print("position   =", result.get("position_idx"))
+        print("executed   =", result.get("executed"))
+        print("reason     =", result.get("reason"))
+
+        final_plan = (
+            result
+            .get("preview", {})
+            .get("final_plan", {})
+        )
+
+        print(
+            "stage      =",
+            final_plan.get("signal_stage"),
+        )
+        print(
+            "percent    =",
+            final_plan.get("entry_percent"),
+        )
+        print(
+            "leverage   =",
+            final_plan.get("selected_leverage"),
+        )
+        print(
+            "qty        =",
+            final_plan.get("qty"),
+        )
+        print(
+            "notional   =",
+            final_plan.get("final_notional"),
+            flush=True,
+        )
+
+    print("=" * 80, flush=True)
 
 
 async def main():
-    client = TelegramClient(
-        SESSION,
-        API_ID,
-        API_HASH,
+    redis_client = redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        decode_responses=True,
     )
 
-    @client.on(events.NewMessage(chats=CHAT_ID))
-    async def handler(event):
-        text = event.raw_text or ""
+    print(
+        "[REDIS] ping =",
+        redis_client.ping(),
+        flush=True,
+    )
 
-        print()
-        print("=" * 80)
-        print("[TELEGRAM]")
-        print("message_id =", event.id)
-        print("-" * 80)
-        print(text)
+    # Start from the current end of the stream.
+    # Signals that existed before this process started are NOT executed.
+    last_id = "$"
 
-        raw_symbol = extract_oi_symbol(text)
+    print("=" * 80)
+    print("SURGE REDIS LISTENER STARTED")
+    print("STREAM  =", REDIS_STREAM)
+    print("START   = NEW EVENTS ONLY")
+    print("MODE    = LIVE TRADING")
+    print("=" * 80, flush=True)
 
-        if raw_symbol:
-            print()
-            print("[OI SIGNAL]")
-            print("raw symbol =", raw_symbol)
-
-            resolution = resolve_surge_symbol_cached(
-                raw_symbol,
+    while True:
+        try:
+            rows = await asyncio.to_thread(
+                redis_client.xread,
+                {REDIS_STREAM: last_id},
+                1,
+                5000,
             )
-
+        except Exception as exc:
             print(
-                "resolved   =",
-                resolution.get("resolved"),
+                "[REDIS READ ERROR]",
+                repr(exc),
+                flush=True,
             )
-            print(
-                "mode       =",
-                resolution.get("mode"),
-            )
-            print(
-                "candidates =",
-                resolution.get("candidates"),
-            )
-            print(
-                "refreshed  =",
-                resolution.get("refreshed"),
-            )
+            await asyncio.sleep(1)
+            continue
 
-            if not resolution.get("resolved"):
+        if not rows:
+            continue
+
+        for _, messages in rows:
+            for stream_id, fields in messages:
+                # Advance before execution. The trading executor's
+                # claim is the second duplicate-execution guard.
+                last_id = stream_id
+
                 print(
-                    "[SURGE SKIP] "
-                    "symbol could not be resolved",
+                    "[REDIS RECEIVE]",
+                    "stream_id =",
+                    stream_id,
                     flush=True,
                 )
-                print("=" * 80, flush=True)
-                return
-
-            symbol = resolution["symbol"]
-
-            print(
-                "final      =",
-                symbol,
-            )
-
-            # ------------------------------------------------
-            # Surge executor LIVE execution
-            #
-            # 현재 Oi 급등종목 전략은 LONG으로 실행한다.
-            # 각 eligible BYBIT user는 독립적으로 실행하며,
-            # 한 사용자의 실행 실패는 다른 사용자 실행을
-            # 중단시키지 않는다.
-            #
-            # execute_surge_market_order()는 dry_run=False로
-            # 호출되므로 execution claim, leverage 적용,
-            # 최종 수량 검증 후 Market 주문을 실행한다.
-            # ------------------------------------------------
-
-            # ------------------------------------------------
-            # Concurrent per-user execution fan-out.
-            #
-            # One Telegram signal is resolved once above.
-            # Every eligible BYBIT user then enters an
-            # independent worker concurrently.
-            #
-            # execute_surge_market_order() is synchronous
-            # because it uses the pybit HTTP client, so each
-            # user execution is moved to a worker thread with
-            # asyncio.to_thread().
-            #
-            # The executor itself performs the final
-            # fail-closed effective-enabled interlock again
-            # immediately before real execution.
-            # ------------------------------------------------
-
-            target_users = []
-
-            for user in get_users():
-                uid = int(user["id"])
-
-                if not int(user["approved"]):
-                    continue
-
-                if not int(user["enabled"]):
-                    continue
-
-                if str(
-                    user["exchange"] or ""
-                ).upper() != "BYBIT":
-                    continue
 
                 try:
-                    effective = get_effective_settings(uid)
+                    await process_signal(fields)
                 except Exception as exc:
                     print(
-                        "[SURGE USER SKIP]",
-                        "user_id =",
-                        uid,
-                        "reason = EFFECTIVE_SETTINGS_ERROR",
+                        "[SURGE SIGNAL ERROR]",
+                        "stream_id =",
+                        stream_id,
                         "error =",
                         repr(exc),
                         flush=True,
                     )
-                    continue
-
-                if not effective.get(
-                    "effective_enabled"
-                ):
-                    print(
-                        "[SURGE USER SKIP]",
-                        "user_id =",
-                        uid,
-                        "reason = AUTO_TRADING_DISABLED",
-                        flush=True,
-                    )
-                    continue
-
-                target_users.append(uid)
-
-            print()
-            print(
-                "[SURGE FANOUT]",
-                "message_id =",
-                event.id,
-                "symbol =",
-                symbol,
-                "users =",
-                target_users,
-                flush=True,
-            )
-
-            async def execute_for_user(uid):
-                try:
-                    return await asyncio.to_thread(
-                        execute_surge_market_order,
-                        user_id=uid,
-                        chat_id=CHAT_ID,
-                        message_id=int(event.id),
-                        symbol=symbol,
-                        side="LONG",
-                        dry_run=False,
-                    )
-                except Exception as exc:
-                    return {
-                        "ok": False,
-                        "dry_run": False,
-                        "executed": False,
-                        "reason": "USER_EXECUTION_EXCEPTION",
-                        "error": (
-                            f"{type(exc).__name__}: {exc}"
-                        ),
-                    }
-
-            tasks = [
-                execute_for_user(uid)
-                for uid in target_users
-            ]
-
-            results = await asyncio.gather(
-                *tasks,
-                return_exceptions=True,
-            )
-
-            for uid, result in zip(
-                target_users,
-                results,
-            ):
-                print()
-                print(
-                    "[SURGE USER RESULT]",
-                    "user_id =",
-                    uid,
-                    flush=True,
-                )
-
-                if isinstance(
-                    result,
-                    BaseException,
-                ):
-                    print(
-                        "error      =",
-                        repr(result),
-                        flush=True,
-                    )
-                    continue
-
-                print(
-                    "message_id =",
-                    event.id,
-                )
-                print(
-                    "symbol     =",
-                    result.get("symbol"),
-                )
-                print(
-                    "side       =",
-                    result.get("side"),
-                )
-                print(
-                    "order_side =",
-                    result.get("order_side"),
-                )
-                print(
-                    "position   =",
-                    result.get("position_idx"),
-                )
-                print(
-                    "executed   =",
-                    result.get("executed"),
-                )
-                print(
-                    "reason     =",
-                    result.get("reason"),
-                )
-
-                final_plan = (
-                    result
-                    .get("preview", {})
-                    .get("final_plan", {})
-                )
-
-                print(
-                    "stage      =",
-                    final_plan.get(
-                        "signal_stage"
-                    ),
-                )
-                print(
-                    "percent    =",
-                    final_plan.get(
-                        "entry_percent"
-                    ),
-                )
-                print(
-                    "leverage   =",
-                    final_plan.get(
-                        "selected_leverage"
-                    ),
-                )
-                print(
-                    "qty        =",
-                    final_plan.get("qty"),
-                )
-                print(
-                    "notional   =",
-                    final_plan.get(
-                        "final_notional"
-                    ),
-                    flush=True,
-                )
-
-        print("=" * 80, flush=True)
-
-    await client.start()
-
-    me = await client.get_me()
-
-    print("=" * 80)
-    print("TELEGRAM LISTENER STARTED")
-    print("ACCOUNT =", me.username or me.id)
-    print("CHAT_ID =", CHAT_ID)
-    print("MODE    = READ ONLY")
-    print("=" * 80)
-
-    await client.run_until_disconnected()
 
 
 if __name__ == "__main__":
