@@ -10,6 +10,7 @@ from surge_trading import get_surge_trailing_settings
 
 POLL_SECONDS = 0.25
 RESET_MAX_AGE_SECONDS = 300.0
+POSITION_VISIBILITY_GRACE_SECONDS = 10.0
 
 
 @dataclass
@@ -34,6 +35,10 @@ class SurgeTrailingManager:
         )
 
         self.states = {}
+
+        # fresh RESET 직후 Bybit REST에 포지션이 아직
+        # 보이지 않을 수 있으므로 해당 심볼만 잠시 보호한다.
+        self.position_visibility_grace = {}
 
     def get_price(self, symbol):
         row = self.redis.hgetall(
@@ -139,6 +144,11 @@ class SurgeTrailingManager:
             None,
         )
 
+        self.position_visibility_grace.pop(
+            symbol,
+            None,
+        )
+
         print(
             "[SURGE TRAIL ACTIVE REMOVE]",
             f"user_id={self.user_id}",
@@ -222,6 +232,20 @@ class SurgeTrailingManager:
         # fresh event만 trailing 대상으로 등록한다.
         self.activate_symbol(symbol)
 
+        # 주문 접수 직후 Bybit REST position 반영 지연으로
+        # ACTIVE가 즉시 삭제되는 race를 막는다.
+        self.position_visibility_grace[
+            symbol
+        ] = time.time()
+
+        print(
+            "[SURGE TRAIL POSITION GRACE START]",
+            f"user_id={self.user_id}",
+            f"symbol={symbol}",
+            f"seconds={POSITION_VISIBILITY_GRACE_SECONDS}",
+            flush=True,
+        )
+
         # 같은 종목의 기존 trailing cycle이 있다면 제거.
         # 다음 포지션 조회에서 실제 Bybit avgPrice로 다시 시작한다.
         self.reset_symbol(symbol)
@@ -232,6 +256,76 @@ class SurgeTrailingManager:
             f"symbol={symbol}",
             f"age={age:.3f}",
             f"event={value}",
+            flush=True,
+        )
+
+    def keep_active_without_position(
+        self,
+        symbol,
+    ):
+        symbol = str(symbol).upper().strip()
+
+        started_at = (
+            self.position_visibility_grace.get(
+                symbol
+            )
+        )
+
+        if started_at is None:
+            return False
+
+        elapsed = max(
+            0.0,
+            time.time() - started_at,
+        )
+
+        if (
+            elapsed
+            < POSITION_VISIBILITY_GRACE_SECONDS
+        ):
+            return True
+
+        self.position_visibility_grace.pop(
+            symbol,
+            None,
+        )
+
+        print(
+            "[SURGE TRAIL POSITION GRACE EXPIRED]",
+            f"user_id={self.user_id}",
+            f"symbol={symbol}",
+            f"elapsed={elapsed:.3f}",
+            flush=True,
+        )
+
+        return False
+
+    def mark_position_visible(
+        self,
+        symbol,
+    ):
+        symbol = str(symbol).upper().strip()
+
+        started_at = (
+            self.position_visibility_grace.pop(
+                symbol,
+                None,
+            )
+        )
+
+        if started_at is None:
+            return
+
+        elapsed = max(
+            0.0,
+            time.time() - started_at,
+        )
+
+        print(
+            "[SURGE TRAIL POSITION VISIBLE]",
+            f"user_id={self.user_id}",
+            f"symbol={symbol}",
+            f"elapsed={elapsed:.3f}",
             flush=True,
         )
 
@@ -582,16 +676,26 @@ class SurgeTrailingManager:
                 )
 
                 for symbol in active_symbols:
-                    if symbol not in positions:
-                        print(
-                            "[SURGE TRAIL REMOVE]",
-                            symbol,
-                            flush=True,
-                        )
-
-                        self.deactivate_symbol(
+                    if symbol in positions:
+                        self.mark_position_visible(
                             symbol
                         )
+                        continue
+
+                    if self.keep_active_without_position(
+                        symbol
+                    ):
+                        continue
+
+                    print(
+                        "[SURGE TRAIL REMOVE]",
+                        symbol,
+                        flush=True,
+                    )
+
+                    self.deactivate_symbol(
+                        symbol
+                    )
 
                 for position in (
                     positions.values()
@@ -730,17 +834,27 @@ def run_multi_user():
                 )
 
                 for symbol in active_symbols:
-                    if symbol not in positions:
-                        print(
-                            "[SURGE TRAIL REMOVE]",
-                            f"user_id={user_id}",
-                            symbol,
-                            flush=True,
-                        )
-
-                        manager.deactivate_symbol(
+                    if symbol in positions:
+                        manager.mark_position_visible(
                             symbol
                         )
+                        continue
+
+                    if manager.keep_active_without_position(
+                        symbol
+                    ):
+                        continue
+
+                    print(
+                        "[SURGE TRAIL REMOVE]",
+                        f"user_id={user_id}",
+                        symbol,
+                        flush=True,
+                    )
+
+                    manager.deactivate_symbol(
+                        symbol
+                    )
 
                 for position in (
                     positions.values()
