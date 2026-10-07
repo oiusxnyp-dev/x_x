@@ -9,6 +9,7 @@ from surge_trading import get_surge_trailing_settings
 
 
 POLL_SECONDS = 0.25
+RESET_MAX_AGE_SECONDS = 300.0
 
 
 @dataclass
@@ -33,9 +34,6 @@ class SurgeTrailingManager:
         )
 
         self.states = {}
-
-        # Redis에서 마지막으로 소비한 급등 진입 reset event.
-        self.last_reset_event = None
 
     def get_price(self, symbol):
         row = self.redis.hgetall(
@@ -151,7 +149,7 @@ class SurgeTrailingManager:
     def consume_reset_event(self):
         """
         surge_trading.py가 실제 급등 주문 접수 후 발행한
-        Redis trailing reset event를 소비한다.
+        Redis trailing reset event를 정확히 한 번 소비한다.
         """
 
         key = (
@@ -159,10 +157,14 @@ class SurgeTrailingManager:
         )
 
         try:
-            value = self.redis.get(key)
+            # Redis 6.2+ GETDEL:
+            # 값을 읽는 동시에 삭제하여 서비스 재시작 후
+            # 과거 reset event가 다시 실행되는 것을 막는다.
+            value = self.redis.getdel(key)
         except redis.RedisError as exc:
             print(
                 "[SURGE TRAIL RESET READ ERROR]",
+                f"user_id={self.user_id}",
                 repr(exc),
                 flush=True,
             )
@@ -171,11 +173,8 @@ class SurgeTrailingManager:
         if not value:
             return
 
-        if value == self.last_reset_event:
-            return
-
         try:
-            symbol, event_time = (
+            symbol, event_time_raw = (
                 value.rsplit(":", 1)
             )
 
@@ -185,32 +184,53 @@ class SurgeTrailingManager:
                 .strip()
             )
 
-            float(event_time)
+            event_time = float(
+                event_time_raw
+            )
+
+            if not symbol:
+                raise ValueError(
+                    "empty reset symbol"
+                )
 
         except Exception:
             print(
                 "[SURGE TRAIL RESET INVALID]",
+                f"user_id={self.user_id}",
                 repr(value),
                 flush=True,
             )
-
-            self.last_reset_event = value
             return
 
-        # 실제 급등 주문이 정상 접수된 뒤 발행된 event이므로
-        # 이 시점부터 해당 종목을 trailing 대상으로 등록한다.
+        age = max(
+            0.0,
+            time.time() - event_time,
+        )
+
+        if age > RESET_MAX_AGE_SECONDS:
+            print(
+                "[SURGE TRAIL RESET STALE]",
+                f"user_id={self.user_id}",
+                f"symbol={symbol}",
+                f"age={age:.3f}",
+                f"max_age={RESET_MAX_AGE_SECONDS}",
+                flush=True,
+            )
+            return
+
+        # 실제 급등 주문이 정상 접수된 직후의
+        # fresh event만 trailing 대상으로 등록한다.
         self.activate_symbol(symbol)
 
         # 같은 종목의 기존 trailing cycle이 있다면 제거.
         # 다음 포지션 조회에서 실제 Bybit avgPrice로 다시 시작한다.
         self.reset_symbol(symbol)
 
-        self.last_reset_event = value
-
         print(
             "[SURGE TRAIL RESET CONSUMED]",
             f"user_id={self.user_id}",
             f"symbol={symbol}",
+            f"age={age:.3f}",
             f"event={value}",
             flush=True,
         )

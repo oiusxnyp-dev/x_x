@@ -5269,6 +5269,7 @@ def execute_surge_market_order(
         redis_client.set(
             reset_key,
             reset_value,
+            ex=300,
         )
 
         print(
