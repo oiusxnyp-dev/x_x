@@ -4,15 +4,9 @@ from dataclasses import dataclass
 import redis
 
 from get_session import get_session
+from user_db import get_users
+from surge_trading import get_surge_trailing_settings
 
-
-USER_ID = 2
-
-# +0.5% 도달 시 trailing 활성화
-TRAIL_ARM_PERCENT = 0.005
-
-# 활성화 후 최고가 대비 -0.5%
-TRAIL_GAP_PERCENT = 0.005
 
 POLL_SECONDS = 0.25
 
@@ -27,7 +21,7 @@ class TrailState:
 
 
 class SurgeTrailingManager:
-    def __init__(self, user_id=USER_ID):
+    def __init__(self, user_id):
         self.user_id = int(user_id)
 
         self.redis = redis.Redis(
@@ -423,9 +417,33 @@ class SurgeTrailingManager:
             if not state.armed:
                 state.high_price = price
 
+        trailing_settings = (
+            get_surge_trailing_settings(
+                self.user_id
+            )
+        )
+
+        arm_percent = (
+            float(
+                trailing_settings[
+                    "arm_percent"
+                ]
+            )
+            / 100.0
+        )
+
+        gap_percent = (
+            float(
+                trailing_settings[
+                    "gap_percent"
+                ]
+            )
+            / 100.0
+        )
+
         arm_price = (
             state.entry_price
-            * (1.0 + TRAIL_ARM_PERCENT)
+            * (1.0 + arm_percent)
         )
 
         if not state.armed:
@@ -456,7 +474,7 @@ class SurgeTrailingManager:
 
         trigger_price = (
             state.high_price
-            * (1.0 - TRAIL_GAP_PERCENT)
+            * (1.0 - gap_percent)
         )
 
         if (
@@ -507,12 +525,18 @@ class SurgeTrailingManager:
             f"USER_ID = {self.user_id}",
             flush=True,
         )
+        settings = get_surge_trailing_settings(
+            self.user_id
+        )
+
         print(
-            "ARM     = +0.5%",
+            "ARM     = "
+            f"+{settings['arm_percent']}%",
             flush=True,
         )
         print(
-            "TRAIL   = HIGH -0.5%",
+            "TRAIL   = HIGH -"
+            f"{settings['gap_percent']}%",
             flush=True,
         )
         print(
@@ -576,5 +600,154 @@ class SurgeTrailingManager:
             )
 
 
+def get_trailing_user_ids():
+    user_ids = []
+
+    for user in get_users():
+        try:
+            user_id = int(user["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if not user.get("approved"):
+            continue
+
+        if not user.get("enabled"):
+            continue
+
+        if (
+            str(
+                user.get("exchange") or ""
+            ).upper()
+            != "BYBIT"
+        ):
+            continue
+
+        try:
+            if get_session(user_id) is None:
+                continue
+        except Exception as exc:
+            print(
+                "[SURGE TRAIL USER SKIP]",
+                f"user_id={user_id}",
+                repr(exc),
+                flush=True,
+            )
+            continue
+
+        user_ids.append(user_id)
+
+    return sorted(user_ids)
+
+
+def run_multi_user():
+    user_ids = get_trailing_user_ids()
+
+    print(
+        "[SURGE TRAIL USERS]",
+        user_ids,
+        flush=True,
+    )
+
+    if not user_ids:
+        raise RuntimeError(
+            "No eligible Bybit trailing users"
+        )
+
+    managers = {
+        user_id: SurgeTrailingManager(
+            user_id
+        )
+        for user_id in user_ids
+    }
+
+    for manager in managers.values():
+        print(
+            "=" * 80,
+            flush=True,
+        )
+        print(
+            "SURGE TRAILING USER READY",
+            f"user_id={manager.user_id}",
+            flush=True,
+        )
+
+        settings = (
+            get_surge_trailing_settings(
+                manager.user_id
+            )
+        )
+
+        print(
+            "ARM     = "
+            f"+{settings['arm_percent']}%",
+            flush=True,
+        )
+        print(
+            "TRAIL   = HIGH -"
+            f"{settings['gap_percent']}%",
+            flush=True,
+        )
+
+    print(
+        "=" * 80,
+        flush=True,
+    )
+
+    while True:
+        for user_id, manager in (
+            managers.items()
+        ):
+            try:
+                manager.consume_reset_event()
+
+                positions = (
+                    manager.get_long_positions()
+                )
+
+                active_symbols = (
+                    manager.get_active_symbols()
+                )
+
+                for symbol in active_symbols:
+                    if symbol not in positions:
+                        print(
+                            "[SURGE TRAIL REMOVE]",
+                            f"user_id={user_id}",
+                            symbol,
+                            flush=True,
+                        )
+
+                        manager.deactivate_symbol(
+                            symbol
+                        )
+
+                for position in (
+                    positions.values()
+                ):
+                    try:
+                        manager.update_position(
+                            position
+                        )
+                    except Exception as exc:
+                        print(
+                            "[SURGE TRAIL POSITION ERROR]",
+                            f"user_id={user_id}",
+                            position["symbol"],
+                            repr(exc),
+                            flush=True,
+                        )
+
+            except Exception as exc:
+                print(
+                    "[SURGE TRAIL USER ERROR]",
+                    f"user_id={user_id}",
+                    repr(exc),
+                    flush=True,
+                )
+
+        time.sleep(POLL_SECONDS)
+
+
 if __name__ == "__main__":
-    SurgeTrailingManager().run()
+    run_multi_user()
