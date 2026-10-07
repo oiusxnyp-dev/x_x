@@ -2,6 +2,7 @@ import sqlite3
 import time
 import re
 from pathlib import Path
+from pybit.exceptions import InvalidRequestError
 from collections import defaultdict
 from contextlib import closing
 
@@ -3864,6 +3865,49 @@ def get_surge_execution(
     return dict(row) if row else None
 
 
+def replace_surge_order_link_id(
+    user_id: int,
+    chat_id: int,
+    message_id: int,
+    *,
+    old_order_link_id: str,
+    new_order_link_id: str,
+):
+    """
+    확실한 Bybit 주문 거절 후 재시도할 때만 사용.
+
+    CLAIMED execution의 order_link_id를 retry 주문 ID로
+    원자적으로 교체한다.
+
+    첫 주문이 확실하게 거절된 경우에만 호출해야 한다.
+    timeout / network / 결과 불명 상태에서는 호출 금지.
+    """
+    init_surge_execution_db()
+
+    with sqlite3.connect(SURGE_EXECUTION_DB) as con:
+        cur = con.execute("""
+            UPDATE surge_executions
+            SET
+                order_link_id=?,
+                updated_at=CURRENT_TIMESTAMP
+            WHERE user_id=?
+              AND chat_id=?
+              AND message_id=?
+              AND status='CLAIMED'
+              AND order_link_id=?
+        """, (
+            str(new_order_link_id),
+            int(user_id),
+            int(chat_id or 0),
+            int(message_id),
+            str(old_order_link_id),
+        ))
+
+        con.commit()
+
+        return cur.rowcount == 1
+
+
 def complete_surge_execution(
     user_id: int,
     chat_id: int,
@@ -4740,20 +4784,325 @@ def execute_surge_market_order(
 
     # --------------------------------------------------------
     # 6. Market 주문
+    #
+    # pybit은 Bybit의 retCode != 0 응답을
+    # InvalidRequestError로 raise한다.
+    #
+    # 잔고/증거금 부족처럼 "주문이 생성되지 않았음"이
+    # 확실한 오류에 대해서만 98% 축소하여 1회 재시도한다.
+    #
+    # timeout/network/기타 불명 예외는 절대로 재주문하지 않고
+    # 기존처럼 CLAIMED + reconcile 처리한다.
     # --------------------------------------------------------
+
+    insufficient_funds_codes = {
+        110004,  # Wallet balance is insufficient
+        110006,  # assets cannot cover position margin
+        110007,  # Available balance is insufficient
+        110012,  # Insufficient available balance
+        110044,  # Available margin is insufficient
+        110045,  # Wallet balance is insufficient
+    }
+
+    retry_plan = None
+    retry_payload = None
+    retry_error = None
 
     try:
         response = session.place_order(
             **payload
         )
 
+    except InvalidRequestError as exc:
+        error_code = int(exc.status_code)
+
+        print(
+            "[SURGE ORDER REJECT]",
+            f"user_id={user_id}",
+            f"symbol={trading_symbol}",
+            f"order_link_id={order_link_id}",
+            f"code={error_code}",
+            f"message={exc.message}",
+            flush=True,
+        )
+
+        if error_code not in insufficient_funds_codes:
+            # Bybit가 명시적으로 거절한 주문.
+            # 주문이 생성되지 않았으므로 FAILED 처리한다.
+            fail_surge_execution(
+                user_id,
+                chat_id,
+                message_id,
+                (
+                    "BYBIT_REJECTED: "
+                    f"{error_code}: {exc.message}"
+                ),
+            )
+
+            return {
+                "ok": False,
+                "dry_run": False,
+                "executed": False,
+                "reason": "BYBIT_REJECTED",
+                "error_code": error_code,
+                "error":
+                    f"{type(exc).__name__}: {exc}",
+                "order_link_id": order_link_id,
+                "claim": claim,
+                "prepared": prepared,
+                "stability": stability,
+                "payload": payload,
+            }
+
+        # ----------------------------------------------------
+        # 확실한 자금/증거금 부족 -> 최신 Available로 다시 계산
+        # 후 98%로 축소하여 단 한 번만 재시도.
+        # ----------------------------------------------------
+
+        try:
+            retry_plan = calculate_reduced_surge_order(
+                user_id,
+                trading_symbol,
+                entry_percent=locked_entry_percent,
+                reduction_factor=0.98,
+            )
+        except Exception as retry_calc_exc:
+            fail_surge_execution(
+                user_id,
+                chat_id,
+                message_id,
+                (
+                    "INSUFFICIENT_RETRY_CALC_FAILED: "
+                    f"{type(retry_calc_exc).__name__}: "
+                    f"{retry_calc_exc}"
+                ),
+            )
+
+            return {
+                "ok": False,
+                "dry_run": False,
+                "executed": False,
+                "reason":
+                    "INSUFFICIENT_RETRY_CALC_FAILED",
+                "initial_error_code": error_code,
+                "error":
+                    f"{type(retry_calc_exc).__name__}: "
+                    f"{retry_calc_exc}",
+                "order_link_id": order_link_id,
+                "claim": claim,
+                "prepared": prepared,
+                "stability": stability,
+                "payload": payload,
+            }
+
+        if not retry_plan.get("retryable"):
+            fail_surge_execution(
+                user_id,
+                chat_id,
+                message_id,
+                (
+                    "INSUFFICIENT_RETRY_NOT_EXECUTABLE: "
+                    f"{retry_plan.get('recalc_reason')}"
+                ),
+            )
+
+            return {
+                "ok": False,
+                "dry_run": False,
+                "executed": False,
+                "reason":
+                    "INSUFFICIENT_RETRY_NOT_EXECUTABLE",
+                "initial_error_code": error_code,
+                "order_link_id": order_link_id,
+                "retry_plan": retry_plan,
+                "claim": claim,
+            }
+
+        retry_qty = float(
+            retry_plan["qty"]
+        )
+
+        retry_order_link_id = (
+            f"{order_link_id}-r1"
+        )
+
+        switched = replace_surge_order_link_id(
+            user_id,
+            chat_id,
+            message_id,
+            old_order_link_id=order_link_id,
+            new_order_link_id=retry_order_link_id,
+        )
+
+        if not switched:
+            # DB가 예상 상태가 아니면 재주문 금지.
+            return {
+                "ok": False,
+                "dry_run": False,
+                "executed": False,
+                "reason":
+                    "RETRY_ORDER_LINK_SWITCH_FAILED",
+                "initial_error_code": error_code,
+                "order_link_id": order_link_id,
+                "retry_order_link_id":
+                    retry_order_link_id,
+                "retry_plan": retry_plan,
+                "claim": claim,
+            }
+
+        order_link_id = retry_order_link_id
+        qty = retry_qty
+
+        retry_payload = {
+            "category": "linear",
+            "symbol": trading_symbol,
+            "side": order_side,
+            "orderType": "Market",
+            "qty": str(qty),
+            "positionIdx": position_idx,
+            "reduceOnly": False,
+            "orderLinkId": order_link_id,
+        }
+
+        print(
+            "[SURGE INSUFFICIENT RETRY]",
+            f"user_id={user_id}",
+            f"symbol={trading_symbol}",
+            f"code={error_code}",
+            "factor=0.98",
+            f"qty={qty}",
+            f"order_link_id={order_link_id}",
+            flush=True,
+        )
+
+        try:
+            response = session.place_order(
+                **retry_payload
+            )
+
+            payload = retry_payload
+            final_plan = {
+                **final_plan,
+                "qty": retry_qty,
+                "final_notional":
+                    retry_plan.get(
+                        "final_notional",
+                        retry_plan.get(
+                            "reduced_actual_value"
+                        ),
+                    ),
+            }
+
+        except InvalidRequestError as retry_exc:
+            retry_code = int(
+                retry_exc.status_code
+            )
+
+            retry_error = (
+                f"{type(retry_exc).__name__}: "
+                f"{retry_exc}"
+            )
+
+            print(
+                "[SURGE RETRY REJECT]",
+                f"user_id={user_id}",
+                f"symbol={trading_symbol}",
+                f"order_link_id={order_link_id}",
+                f"code={retry_code}",
+                f"message={retry_exc.message}",
+                flush=True,
+            )
+
+            # 두 번째 Bybit 명시적 거절.
+            # 더 이상 재시도하지 않는다.
+            fail_surge_execution(
+                user_id,
+                chat_id,
+                message_id,
+                (
+                    "BYBIT_RETRY_REJECTED: "
+                    f"{retry_code}: "
+                    f"{retry_exc.message}"
+                ),
+            )
+
+            return {
+                "ok": False,
+                "dry_run": False,
+                "executed": False,
+                "reason":
+                    "BYBIT_RETRY_REJECTED",
+                "initial_error_code": error_code,
+                "retry_error_code": retry_code,
+                "error": retry_error,
+                "order_link_id": order_link_id,
+                "retry_plan": retry_plan,
+                "payload": retry_payload,
+                "claim": claim,
+            }
+
+        except Exception as retry_exc:
+            # 재시도 요청의 결과가 불명확하다.
+            # 절대로 세 번째 주문을 만들지 않는다.
+            reconcile = reconcile_surge_execution(
+                user_id,
+                chat_id,
+                message_id,
+            )
+
+            retry_error = (
+                f"{type(retry_exc).__name__}: "
+                f"{retry_exc}"
+            )
+
+            print(
+                "[SURGE RETRY EXCEPTION]",
+                f"user_id={user_id}",
+                f"symbol={trading_symbol}",
+                f"order_link_id={order_link_id}",
+                retry_error,
+                f"reconcile_state="
+                f"{reconcile.get('reconcile', {}).get('state')}",
+                flush=True,
+            )
+
+            return {
+                "ok": False,
+                "dry_run": False,
+                "executed": True,
+                "reason":
+                    "ORDER_RETRY_EXCEPTION_RECONCILE",
+                "initial_error_code": error_code,
+                "error": retry_error,
+                "order_link_id": order_link_id,
+                "retry_plan": retry_plan,
+                "payload": retry_payload,
+                "claim": claim,
+                "reconcile": reconcile,
+            }
+
     except Exception as exc:
-        # 네트워크/timeout 예외는 주문 미접수라고 단정할 수 없다.
-        # FAILED 처리하지 않고 CLAIMED를 유지한 채 reconcile.
+        # 네트워크/timeout 등 결과가 불명확한 예외.
+        # 주문 미접수라고 단정할 수 없으므로 재시도 금지.
         reconcile = reconcile_surge_execution(
             user_id,
             chat_id,
             message_id,
+        )
+
+        error_text = (
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        print(
+            "[SURGE ORDER EXCEPTION]",
+            f"user_id={user_id}",
+            f"symbol={trading_symbol}",
+            f"order_link_id={order_link_id}",
+            error_text,
+            f"reconcile_state="
+            f"{reconcile.get('reconcile', {}).get('state')}",
+            flush=True,
         )
 
         return {
@@ -4761,8 +5110,8 @@ def execute_surge_market_order(
             "dry_run": False,
             "executed": True,
             "reason": "ORDER_EXCEPTION_RECONCILE",
-            "error":
-                f"{type(exc).__name__}: {exc}",
+            "error": error_text,
+            "order_link_id": order_link_id,
             "claim": claim,
             "prepared": prepared,
             "stability": stability,
