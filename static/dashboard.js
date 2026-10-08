@@ -940,7 +940,7 @@
     }
 })();
 /* ============================================================
- * Recent surge Telegram messages
+ * Telegram message event feed
  * ============================================================ */
 (() => {
     const container =
@@ -952,6 +952,17 @@
         return;
     }
 
+    const PAGE_SIZE = 12;
+    const POLL_MS = 1000;
+
+    let nextCursor = null;
+    let hasMore = true;
+    let loadingOlder = false;
+    let polling = false;
+    let initialized = false;
+
+    const knownKeys = new Set();
+
     function escapeHtml(value) {
         return String(value ?? "")
             .replaceAll("&", "&amp;")
@@ -961,7 +972,40 @@
             .replaceAll("'", "&#039;");
     }
 
-    function formatTime(value) {
+    function eventKey(row) {
+        if (
+            row.source === "history" &&
+            row.version_id
+        ) {
+            return (
+                "history:" +
+                String(row.version_id)
+            );
+        }
+
+        return [
+            row.source || "legacy",
+            row.chat_id,
+            row.message_id,
+            row.event_type || "NEW",
+        ].join(":");
+    }
+
+    function eventTime(row) {
+        if (
+            row.source === "history" &&
+            row.event_type === "EDIT"
+        ) {
+            return (
+                row.edit_time_iso ||
+                row.message_time_iso
+            );
+        }
+
+        return row.message_time_iso;
+    }
+
+    function formatKst(value) {
         if (!value) {
             return "-";
         }
@@ -969,109 +1013,685 @@
         const date = new Date(value);
 
         if (Number.isNaN(date.getTime())) {
-            return value;
+            return String(value);
         }
 
-        return date.toLocaleString(
-            "ko-KR",
-            {
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                hour12: false,
-            }
+        const parts =
+            new Intl.DateTimeFormat(
+                "ko-KR",
+                {
+                    timeZone: "Asia/Seoul",
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: false,
+                }
+            ).formatToParts(date);
+
+        const values = {};
+
+        for (const part of parts) {
+            values[part.type] = part.value;
+        }
+
+        const tenth =
+            Math.floor(
+                date.getMilliseconds() / 100
+            );
+
+        return (
+            `${values.year}.${values.month}.` +
+            `${values.day} ` +
+            `${values.hour}:${values.minute}:` +
+            `${values.second}.${tenth}`
         );
     }
 
-    function render(messages) {
-        if (
-            !Array.isArray(messages) ||
-            messages.length === 0
-        ) {
-            container.innerHTML = `
-                <div class="surge-recent-empty">
-                    표시할 급등 메시지가 없습니다.
-                </div>
-            `;
-            return;
+    function channelName(row) {
+        if (row.chat_name) {
+            return row.chat_name;
         }
 
-        container.innerHTML =
-            messages.map((row) => {
-                const symbol =
-                    escapeHtml(row.symbol || "-");
+        if (
+            Number(row.chat_id) ===
+            -1004442764226
+        ) {
+            return "멍꿀단 : 정보통";
+        }
 
-                const stage =
-                    Number(row.signal_stage || 0);
+        if (
+            Number(row.chat_id) ===
+            -1003849484550
+        ) {
+            return "(구)멍꿀단 : 정보통";
+        }
 
-                const time =
-                    escapeHtml(
-                        formatTime(
-                            row.message_time_iso
-                        )
-                    );
-
-                const body =
-                    escapeHtml(row.text || "");
-
-                return `
-                    <article class="surge-recent-item">
-                        <div class="surge-recent-meta">
-                            <strong
-                                class="surge-recent-symbol"
-                            >
-                                #${symbol}
-                            </strong>
-
-                            <span>
-                                ${stage}차
-                            </span>
-
-                            <span>
-                                ${time}
-                            </span>
-                        </div>
-
-                        <div class="surge-recent-text">${body}</div>
-                    </article>
-                `;
-            }).join("");
+        return String(row.chat_id || "-");
     }
 
-    async function loadRecentSurgeMessages() {
-        try {
-            const response = await fetch(
-                "/api/surge/recent-messages",
-                {
-                    cache: "no-store",
-                }
+    function senderText(row) {
+        const channel =
+            channelName(row);
+
+        const sender =
+            String(
+                row.sender_name || ""
+            ).trim();
+
+        const username =
+            String(
+                row.sender_username || ""
+            ).trim();
+
+        if (
+            sender &&
+            sender !== channel
+        ) {
+            return (
+                username
+                    ? `${sender} (@${username})`
+                    : sender
+            );
+        }
+
+        if (username) {
+            return `@${username}`;
+        }
+
+        return "";
+    }
+
+    function messageLabel(row) {
+        const id =
+            escapeHtml(row.message_id);
+
+        if (
+            row.event_type === "EDIT" &&
+            row.source === "history"
+        ) {
+            return `${id}번 메시지 수정 데이터`;
+        }
+
+        return `${id}번 메시지`;
+    }
+
+    function renderCard(row) {
+        const surge =
+            Boolean(row.is_surge);
+
+        const edit =
+            (
+                row.event_type === "EDIT" &&
+                row.source === "history"
             );
 
-            const data = await response.json();
+        const legacyEdited =
+            Boolean(
+                row.legacy_was_edited
+            );
 
-            if (!data.ok) {
-                throw new Error(
-                    data.error ||
-                    "recent message load failed"
+        const classes = [
+            "surge-recent-item",
+        ];
+
+        if (surge) {
+            classes.push(
+                "surge-recent-item--surge"
+            );
+        }
+
+        if (edit) {
+            classes.push(
+                "surge-recent-item--edit"
+            );
+        }
+
+        const channel =
+            escapeHtml(
+                channelName(row)
+            );
+
+        const sender =
+            senderText(row);
+
+        const time =
+            escapeHtml(
+                formatKst(
+                    eventTime(row)
+                )
+            );
+
+        const label =
+            escapeHtml(
+                messageLabel(row)
+            );
+
+        const body =
+            escapeHtml(
+                row.text || ""
+            );
+
+        const badges = [];
+
+        if (surge) {
+            badges.push(
+                '<span class="surge-feed-badge surge-feed-badge--surge">OI 급등</span>'
+            );
+        }
+
+        if (edit) {
+            badges.push(
+                '<span class="surge-feed-badge surge-feed-badge--edit">수정 데이터</span>'
+            );
+        } else if (legacyEdited) {
+            badges.push(
+                '<span class="surge-feed-badge surge-feed-badge--legacy-edit">수정됨</span>'
+            );
+        }
+
+        if (
+            row.media_type ||
+            row.has_media
+        ) {
+            badges.push(
+                '<span class="surge-feed-badge">사진/미디어</span>'
+            );
+        }
+
+        let senderHtml = "";
+
+        if (sender) {
+            senderHtml = `
+                <span class="surge-feed-sender">
+                    보낸이 · ${escapeHtml(sender)}
+                </span>
+            `;
+        }
+
+        let editNote = "";
+
+        if (legacyEdited) {
+            editNote = `
+                <div class="surge-feed-edit-note">
+                    과거 데이터는 수정 전 원문이
+                    보존되어 있지 않습니다.
+                </div>
+            `;
+        }
+
+        let album = "";
+
+        if (row.grouped_id) {
+            album = `
+                <span class="surge-feed-album">
+                    앨범 · ${escapeHtml(row.grouped_id)}
+                </span>
+            `;
+        }
+
+        let mediaHtml = "";
+
+        if (row.media_path) {
+            const mediaUrl =
+                escapeHtml(
+                    row.media_path
                 );
+
+            mediaHtml = `
+                <button
+                    class="surge-feed-photo-button"
+                    type="button"
+                    data-surge-photo="${mediaUrl}"
+                    aria-label="사진 크게 보기"
+                >
+                    <img
+                        class="surge-feed-photo"
+                        src="${mediaUrl}"
+                        alt="${escapeHtml(
+                            row.message_id
+                        )}번 메시지 사진"
+                        loading="lazy"
+                    >
+                </button>
+            `;
+        }
+
+        let emptyBody = body;
+
+        if (!emptyBody) {
+            if (
+                row.media_type ||
+                row.has_media
+            ) {
+                emptyBody =
+                    '<span class="surge-feed-muted">미디어 메시지</span>';
+            } else {
+                emptyBody =
+                    '<span class="surge-feed-muted">본문 없음</span>';
+            }
+        }
+
+        return `
+            <article
+                class="${classes.join(" ")}"
+                data-event-key="${escapeHtml(eventKey(row))}"
+            >
+                <div class="surge-feed-topline">
+                    <strong class="surge-feed-message-id">
+                        ${label}
+                    </strong>
+
+                    <div class="surge-feed-badges">
+                        ${badges.join("")}
+                    </div>
+                </div>
+
+                <div class="surge-recent-meta">
+                    <span>
+                        ${channel}
+                    </span>
+
+                    ${senderHtml}
+
+                    <span>
+                        ${edit ? "수정" : "게시"} ·
+                        ${time} KST
+                    </span>
+
+                    ${album}
+                </div>
+
+                ${editNote}
+
+                ${mediaHtml}
+
+                <div class="surge-recent-text">${emptyBody}</div>
+            </article>
+        `;
+    }
+
+    function makeFragment(messages) {
+        const template =
+            document.createElement(
+                "template"
+            );
+
+        template.innerHTML =
+            messages
+                .map(renderCard)
+                .join("");
+
+        return template.content;
+    }
+
+    function remember(messages) {
+        for (const row of messages) {
+            knownKeys.add(
+                eventKey(row)
+            );
+        }
+    }
+
+    function clearLoadingMessage() {
+        const empty =
+            container.querySelector(
+                ".surge-recent-empty"
+            );
+
+        if (empty) {
+            empty.remove();
+        }
+    }
+
+    async function fetchPage(before=null) {
+        const params =
+            new URLSearchParams();
+
+        params.set(
+            "limit",
+            String(PAGE_SIZE)
+        );
+
+        if (before) {
+            params.set(
+                "before",
+                before
+            );
+        }
+
+        const response = await fetch(
+            "/api/surge/recent-messages?" +
+            params.toString(),
+            {
+                cache: "no-store",
+            }
+        );
+
+        const data =
+            await response.json();
+
+        if (!data.ok) {
+            throw new Error(
+                data.error ||
+                "message feed load failed"
+            );
+        }
+
+        return data;
+    }
+
+    async function initialLoad() {
+        try {
+            const data =
+                await fetchPage();
+
+            const messages =
+                Array.isArray(data.messages)
+                    ? data.messages
+                    : [];
+
+            container.innerHTML = "";
+
+            if (!messages.length) {
+                container.innerHTML = `
+                    <div class="surge-recent-empty">
+                        표시할 메시지가 없습니다.
+                    </div>
+                `;
+            } else {
+                container.appendChild(
+                    makeFragment(messages)
+                );
+
+                remember(messages);
             }
 
-            render(data.messages || []);
+            nextCursor =
+                data.next_cursor || null;
+
+            hasMore =
+                Boolean(data.has_more);
+
+            initialized = true;
 
         } catch (error) {
             console.error(
-                "Recent surge messages:",
+                "Telegram message feed:",
                 error
             );
 
             container.innerHTML = `
                 <div class="surge-recent-empty">
-                    최근 메시지를 불러오지 못했습니다.
+                    메시지를 불러오지 못했습니다.
                 </div>
             `;
         }
     }
 
-    loadRecentSurgeMessages();
+    async function loadOlder() {
+        if (
+            !initialized ||
+            loadingOlder ||
+            !hasMore ||
+            !nextCursor
+        ) {
+            return;
+        }
+
+        loadingOlder = true;
+
+        try {
+            const data =
+                await fetchPage(
+                    nextCursor
+                );
+
+            const messages =
+                (
+                    Array.isArray(data.messages)
+                        ? data.messages
+                        : []
+                ).filter(
+                    (row) =>
+                        !knownKeys.has(
+                            eventKey(row)
+                        )
+                );
+
+            if (messages.length) {
+                clearLoadingMessage();
+
+                container.appendChild(
+                    makeFragment(messages)
+                );
+
+                remember(messages);
+            }
+
+            nextCursor =
+                data.next_cursor || null;
+
+            hasMore =
+                Boolean(data.has_more);
+
+        } catch (error) {
+            console.error(
+                "Older Telegram messages:",
+                error
+            );
+        } finally {
+            loadingOlder = false;
+        }
+    }
+
+    async function pollNewest() {
+        if (
+            !initialized ||
+            polling
+        ) {
+            return;
+        }
+
+        polling = true;
+
+        try {
+            const data =
+                await fetchPage();
+
+            const messages =
+                Array.isArray(data.messages)
+                    ? data.messages
+                    : [];
+
+            const fresh =
+                messages.filter(
+                    (row) =>
+                        !knownKeys.has(
+                            eventKey(row)
+                        )
+                );
+
+            if (!fresh.length) {
+                return;
+            }
+
+            clearLoadingMessage();
+
+            const oldScrollLeft =
+                container.scrollLeft;
+
+            container.prepend(
+                makeFragment(fresh)
+            );
+
+            remember(fresh);
+
+            // 사용자가 과거 메시지를 보고 있으면
+            // 새 카드가 들어와도 현재 위치를 최대한 유지한다.
+            if (oldScrollLeft > 20) {
+                requestAnimationFrame(
+                    () => {
+                        const addedWidth =
+                            Array.from(
+                                container.children
+                            )
+                            .slice(
+                                0,
+                                fresh.length
+                            )
+                            .reduce(
+                                (total, node) =>
+                                    total +
+                                    node.getBoundingClientRect()
+                                        .width +
+                                    12,
+                                0
+                            );
+
+                        container.scrollLeft =
+                            oldScrollLeft +
+                            addedWidth;
+                    }
+                );
+            } else {
+                container.scrollLeft = 0;
+            }
+
+        } catch (error) {
+            console.error(
+                "Telegram message poll:",
+                error
+            );
+        } finally {
+            polling = false;
+        }
+    }
+
+    let photoModal = null;
+
+    function closePhotoModal() {
+        if (!photoModal) {
+            return;
+        }
+
+        photoModal.remove();
+        photoModal = null;
+
+        document.body.classList.remove(
+            "surge-photo-modal-open"
+        );
+    }
+
+    function openPhotoModal(src) {
+        closePhotoModal();
+
+        const overlay =
+            document.createElement(
+                "div"
+            );
+
+        overlay.className =
+            "surge-photo-modal";
+
+        overlay.innerHTML = `
+            <button
+                class="surge-photo-modal-close"
+                type="button"
+                aria-label="사진 닫기"
+            >
+                ×
+            </button>
+
+            <img
+                class="surge-photo-modal-image"
+                src="${escapeHtml(src)}"
+                alt="텔레그램 사진 확대"
+            >
+        `;
+
+        overlay.addEventListener(
+            "click",
+            (event) => {
+                if (
+                    event.target === overlay ||
+                    event.target.closest(
+                        ".surge-photo-modal-close"
+                    )
+                ) {
+                    closePhotoModal();
+                }
+            }
+        );
+
+        document.body.appendChild(
+            overlay
+        );
+
+        document.body.classList.add(
+            "surge-photo-modal-open"
+        );
+
+        photoModal = overlay;
+    }
+
+    container.addEventListener(
+        "click",
+        (event) => {
+            const button =
+                event.target.closest(
+                    "[data-surge-photo]"
+                );
+
+            if (!button) {
+                return;
+            }
+
+            const src =
+                button.getAttribute(
+                    "data-surge-photo"
+                );
+
+            if (src) {
+                openPhotoModal(src);
+            }
+        }
+    );
+
+    document.addEventListener(
+        "keydown",
+        (event) => {
+            if (
+                event.key === "Escape"
+            ) {
+                closePhotoModal();
+            }
+        }
+    );
+
+    container.addEventListener(
+        "scroll",
+        () => {
+            const remaining =
+                container.scrollWidth -
+                container.clientWidth -
+                container.scrollLeft;
+
+            if (remaining < 500) {
+                loadOlder();
+            }
+        },
+        {
+            passive: true,
+        }
+    );
+
+    initialLoad().then(() => {
+        window.setInterval(
+            pollNewest,
+            POLL_MS
+        );
+    });
 })();

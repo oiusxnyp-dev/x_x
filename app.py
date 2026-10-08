@@ -6,7 +6,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
@@ -15,6 +18,7 @@ from get_session import get_session
 from bybit_ws import ensure_bybit_realtime
 from realtime import realtime
 from user_db import authenticate_user, get_user_by_id
+from surge_message_history import get_message_feed
 from surge_trading import (
     get_settings as get_surge_settings,
     save_settings as save_surge_settings,
@@ -191,9 +195,59 @@ async def dashboard(request: Request):
     )
 
 
+@app.get("/api/surge/media/{filename}")
+async def surge_media_api(
+    request: Request,
+    filename: str,
+):
+    user = current_user(request)
+
+    if not user:
+        return RedirectResponse(
+            url="/login",
+            status_code=303,
+        )
+
+    # 파일명만 허용해서 ../ 등의 경로 이동 차단.
+    safe_name = Path(filename).name
+
+    if (
+        safe_name != filename
+        or not safe_name.endswith(".webp")
+    ):
+        return {
+            "ok": False,
+            "error": "invalid_media",
+        }
+
+    media_dir = (
+        BASE_DIR
+        / "surge_media"
+    )
+
+    media_path = (
+        media_dir
+        / safe_name
+    )
+
+    if not media_path.is_file():
+        return {
+            "ok": False,
+            "error": "media_not_found",
+        }
+
+    return FileResponse(
+        media_path,
+        media_type="image/webp",
+        filename=safe_name,
+    )
+
+
 @app.get("/api/surge/recent-messages")
 async def surge_recent_messages_api(
     request: Request,
+    limit: int = 12,
+    before: str | None = None,
 ):
     user = current_user(request)
 
@@ -202,36 +256,20 @@ async def surge_recent_messages_api(
             "ok": False,
             "error": "not_authenticated",
             "messages": [],
+            "next_cursor": None,
+            "has_more": False,
         }
 
     try:
-        signals = await asyncio.to_thread(
-            get_all_surge_signals
-        )
-
-        recent = list(
-            reversed(signals[-2:])
+        result = await asyncio.to_thread(
+            get_message_feed,
+            limit=limit,
+            before=before,
         )
 
         return {
             "ok": True,
-            "messages": [
-                {
-                    "message_id":
-                        row.get("message_id"),
-                    "symbol":
-                        row.get("symbol"),
-                    "signal_stage":
-                        row.get("signal_stage"),
-                    "message_time_iso":
-                        row.get("message_time_iso"),
-                    "edit_time_iso":
-                        row.get("edit_time_iso"),
-                    "text":
-                        row.get("text") or "",
-                }
-                for row in recent
-            ],
+            **result,
         }
 
     except Exception as exc:
@@ -239,6 +277,8 @@ async def surge_recent_messages_api(
             "ok": False,
             "error": str(exc),
             "messages": [],
+            "next_cursor": None,
+            "has_more": False,
         }
 
 

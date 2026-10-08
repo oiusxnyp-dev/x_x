@@ -2131,3 +2131,322 @@ input:focus {
         flex: 0 0 auto;
     }
 }
+
+/* ============================================================
+ * Telegram horizontal message event feed
+ * ============================================================ */
+
+.surge-recent-messages {
+    display: flex;
+    grid-template-columns: none;
+
+    align-items: stretch;
+
+    gap: 12px;
+
+    overflow-x: auto;
+    overflow-y: visible;
+
+    padding: 16px 24px 20px;
+
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+
+    scrollbar-width: thin;
+}
+
+.surge-recent-item {
+    flex: 0 0 390px;
+
+    min-width: 390px;
+    max-width: 390px;
+
+    padding: 15px 17px;
+
+    border: 1px solid #303229;
+    border-radius: 10px;
+
+    background:
+        linear-gradient(
+            180deg,
+            #12140f,
+            #0f110e
+        );
+
+    scroll-snap-align: start;
+}
+
+.surge-recent-item--surge {
+    border-width: 2px;
+    border-color: #d8a938;
+
+    box-shadow:
+        inset 0 0 0 1px
+        rgba(216, 169, 56, 0.15),
+        0 0 18px
+        rgba(216, 169, 56, 0.10);
+
+    background:
+        linear-gradient(
+            180deg,
+            #211b0c,
+            #15120b
+        );
+}
+
+.surge-recent-item--edit {
+    border-color: #8c7040;
+}
+
+.surge-recent-item--surge.surge-recent-item--edit {
+    border-color: #e1b340;
+}
+
+.surge-feed-topline {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+
+    gap: 10px;
+
+    margin-bottom: 8px;
+}
+
+.surge-feed-message-id {
+    color: #e6e4d7;
+
+    font-size: 13px;
+    font-weight: 750;
+}
+
+.surge-feed-badges {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+
+    gap: 5px;
+}
+
+.surge-feed-badge {
+    display: inline-flex;
+    align-items: center;
+
+    min-height: 20px;
+
+    padding: 2px 7px;
+
+    border: 1px solid #45473e;
+    border-radius: 999px;
+
+    color: #aaa99b;
+
+    font-size: 10px;
+    font-weight: 700;
+
+    white-space: nowrap;
+}
+
+.surge-feed-badge--surge {
+    border-color: #d8a938;
+
+    color: #ffe28a;
+
+    background:
+        rgba(216, 169, 56, 0.15);
+}
+
+.surge-feed-badge--edit {
+    border-color: #92713a;
+
+    color: #e5c579;
+
+    background:
+        rgba(146, 113, 58, 0.14);
+}
+
+.surge-feed-badge--legacy-edit {
+    color: #b8b39e;
+}
+
+.surge-feed-sender {
+    color: #c2b98e;
+}
+
+.surge-feed-album {
+    color: #8e8d80;
+}
+
+.surge-feed-edit-note {
+    margin: 0 0 10px;
+
+    padding: 7px 9px;
+
+    border-left: 2px solid #806b3f;
+
+    color: #aaa28c;
+    background: rgba(128, 107, 63, 0.08);
+
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+.surge-recent-text {
+    max-height: none;
+    overflow: visible;
+
+    color: #d4d3c8;
+
+    font-size: 12px;
+    line-height: 1.6;
+
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.surge-feed-muted {
+    color: #77786f;
+    font-style: italic;
+}
+
+.surge-recent-empty {
+    flex: 1 0 100%;
+
+    padding: 22px;
+
+    color: #8f9086;
+
+    text-align: center;
+    font-size: 12px;
+}
+
+@media (max-width: 800px) {
+    .surge-recent-messages {
+        display: flex;
+
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+
+    .surge-recent-item {
+        flex-basis:
+            min(
+                86vw,
+                370px
+            );
+
+        min-width:
+            min(
+                86vw,
+                370px
+            );
+
+        max-width:
+            min(
+                86vw,
+                370px
+            );
+    }
+}
+
+@media (max-width: 430px) {
+    .surge-recent-item {
+        flex-basis: 84vw;
+        min-width: 84vw;
+        max-width: 84vw;
+    }
+}
+
+/* ============================================================
+ * Telegram feed photo preview
+ * ============================================================ */
+
+.surge-feed-photo-button {
+    display: block;
+    width: 100%;
+    margin: 0 0 11px;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    overflow: hidden;
+    background: #090a08;
+    cursor: zoom-in;
+}
+
+.surge-feed-photo {
+    display: block;
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    background: #090a08;
+}
+
+.surge-photo-modal-open {
+    overflow: hidden;
+}
+
+.surge-photo-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 24px;
+
+    background:
+        rgba(0, 0, 0, 0.88);
+}
+
+.surge-photo-modal-image {
+    display: block;
+
+    max-width: min(
+        96vw,
+        1400px
+    );
+
+    max-height: 92vh;
+
+    object-fit: contain;
+
+    border-radius: 8px;
+}
+
+.surge-photo-modal-close {
+    position: fixed;
+    top: 14px;
+    right: 16px;
+
+    z-index: 10001;
+
+    width: 42px;
+    height: 42px;
+
+    padding: 0;
+
+    border: 1px solid #555;
+    border-radius: 50%;
+
+    color: #eee;
+    background:
+        rgba(20, 20, 20, 0.88);
+
+    font-size: 28px;
+    line-height: 38px;
+
+    cursor: pointer;
+}
+
+@media (max-width: 430px) {
+    .surge-photo-modal {
+        padding: 10px;
+    }
+
+    .surge-photo-modal-image {
+        max-width: 98vw;
+        max-height: 90vh;
+    }
+}

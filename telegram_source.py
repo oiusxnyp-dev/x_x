@@ -7,6 +7,11 @@ import time
 import redis
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from surge_message_history import (
+    get_previous_text,
+    make_webp,
+    save_message_version,
+)
 
 
 load_dotenv(".env")
@@ -118,82 +123,433 @@ async def main():
 
     EDIT_MAX_AGE_SECONDS = 60
 
+    # 웹 기록 전용 큐.
+    # 실매매 handler는 이 큐를 기다리지 않는다.
+    history_queue = asyncio.Queue(
+        maxsize=1000,
+    )
+
+    async def history_worker():
+        print(
+            "[WEB HISTORY WORKER] STARTED",
+            flush=True,
+        )
+
+        while True:
+            job = await history_queue.get()
+
+            try:
+                event = job["event"]
+
+                chat_id = job["chat_id"]
+                message_id = job["message_id"]
+                chat_name = job["chat_name"]
+                event_type = job["event_type"]
+                text = job["text"]
+                raw_symbol = job["raw_symbol"]
+                received_at = job["received_at"]
+                telegram_date = job["telegram_date"]
+                edit_date = job["edit_date"]
+
+                # 이전 버전 조회도 별도 thread.
+                previous_text = None
+
+                if event_type == "EDIT":
+                    previous_text = (
+                        await asyncio.to_thread(
+                            get_previous_text,
+                            chat_id,
+                            message_id,
+                        )
+                    )
+
+                # Sender 조회는 Telethon async 작업.
+                sender_id = getattr(
+                    event,
+                    "sender_id",
+                    None,
+                )
+
+                sender_name = ""
+                sender_username = ""
+
+                try:
+                    sender = await event.get_sender()
+
+                    if sender is not None:
+                        sender_id = (
+                            getattr(
+                                sender,
+                                "id",
+                                None,
+                            )
+                            or sender_id
+                        )
+
+                        sender_username = (
+                            getattr(
+                                sender,
+                                "username",
+                                None,
+                            )
+                            or ""
+                        )
+
+                        first_name = (
+                            getattr(
+                                sender,
+                                "first_name",
+                                None,
+                            )
+                            or ""
+                        )
+
+                        last_name = (
+                            getattr(
+                                sender,
+                                "last_name",
+                                None,
+                            )
+                            or ""
+                        )
+
+                        title = (
+                            getattr(
+                                sender,
+                                "title",
+                                None,
+                            )
+                            or ""
+                        )
+
+                        sender_name = " ".join(
+                            value
+                            for value in (
+                                first_name,
+                                last_name,
+                            )
+                            if value
+                        ).strip()
+
+                        if not sender_name:
+                            sender_name = (
+                                title
+                                or sender_username
+                                or ""
+                            )
+
+                except Exception as exc:
+                    print(
+                        "[WEB SENDER WARNING]",
+                        "message_id =",
+                        message_id,
+                        "error =",
+                        (
+                            f"{type(exc).__name__}: "
+                            f"{exc}"
+                        ),
+                        flush=True,
+                    )
+
+                # 실제 sender를 확인하지 못한 경우에는
+                # channel name을 sender로 저장하지 않는다.
+                # 웹 UI에서만 chat_name을 fallback으로 사용한다.
+
+                # 사진 다운로드도 실매매 handler와 분리.
+                media_type = None
+                media_path = None
+                downloaded_path = None
+
+                try:
+                    if event.photo:
+                        temp_dir = (
+                            Path(__file__)
+                            .resolve()
+                            .parent
+                            / "telegram_downloads"
+                        )
+
+                        temp_dir.mkdir(
+                            parents=True,
+                            exist_ok=True,
+                        )
+
+                        media_version = str(
+                            int(
+                                float(received_at)
+                                * 1000
+                            )
+                        )
+
+                        temp_target = (
+                            temp_dir
+                            / (
+                                "web_"
+                                f"{abs(chat_id)}_"
+                                f"{message_id}_"
+                                f"{media_version}"
+                            )
+                        )
+
+                        downloaded_path = (
+                            await event.download_media(
+                                file=str(temp_target),
+                            )
+                        )
+
+                        if downloaded_path:
+                            media_path = (
+                                await asyncio.to_thread(
+                                    make_webp,
+                                    downloaded_path,
+                                    chat_id,
+                                    message_id,
+                                    received_at,
+                                )
+                            )
+
+                            media_type = "photo"
+
+                except Exception as exc:
+                    print(
+                        "[WEB MEDIA WARNING]",
+                        "message_id =",
+                        message_id,
+                        "error =",
+                        (
+                            f"{type(exc).__name__}: "
+                            f"{exc}"
+                        ),
+                        flush=True,
+                    )
+
+                # 다운로드한 Telegram 원본은 보존한다.
+                # 웹에서는 media_path의 WebP preview만 사용한다.
+
+                # SQLite 저장도 별도 thread.
+                await asyncio.to_thread(
+                    save_message_version,
+                    chat_id=chat_id,
+                    chat_name=chat_name,
+                    message_id=message_id,
+                    event_type=event_type,
+                    text=text,
+                    previous_text=previous_text,
+                    is_surge=bool(raw_symbol),
+                    raw_symbol=raw_symbol,
+                    sender_id=sender_id,
+                    sender_name=sender_name,
+                    sender_username=(
+                        sender_username
+                    ),
+                    telegram_date=telegram_date,
+                    edit_date=edit_date,
+                    received_at=received_at,
+                    media_type=media_type,
+                    media_path=media_path,
+                )
+
+                print(
+                    "[WEB HISTORY SAVED]",
+                    "message_id =",
+                    message_id,
+                    "event_type =",
+                    event_type,
+                    "surge =",
+                    bool(raw_symbol),
+                    "media =",
+                    bool(media_path),
+                    flush=True,
+                )
+
+            except Exception as exc:
+                # 웹 기록 실패는 실매매에 전파하지 않는다.
+                print(
+                    "[WEB HISTORY WARNING]",
+                    (
+                        f"{type(exc).__name__}: "
+                        f"{exc}"
+                    ),
+                    flush=True,
+                )
+
+            finally:
+                history_queue.task_done()
+
+    # 웹 기록 worker는 독립 task.
+    asyncio.create_task(
+        history_worker()
+    )
+
     async def handler(event):
         text = event.raw_text or ""
 
         event_type = (
             "EDIT"
-            if isinstance(event, events.MessageEdited.Event)
+            if isinstance(
+                event,
+                events.MessageEdited.Event,
+            )
             else "NEW"
         )
-
-        if event_type == "EDIT":
-            message_date = event.date
-            edit_date = event.edit_date
-
-            if message_date and edit_date:
-                edit_age = (
-                    edit_date - message_date
-                ).total_seconds()
-
-                if edit_age > EDIT_MAX_AGE_SECONDS:
-                    print(
-                        "[OI EDIT SKIP]",
-                        "message_id =",
-                        event.id,
-                        "age_seconds =",
-                        edit_age,
-                        "reason = EDIT_TOO_OLD",
-                        flush=True,
-                    )
-                    return
-
-        raw_symbol = extract_oi_symbol(text)
-
-        # 급등종목이 아니면 Redis로 보내지 않는다.
-        if not raw_symbol:
-            return
 
         chat_id = int(event.chat_id)
         message_id = int(event.id)
 
-        payload = {
-            "chat_id": str(chat_id),
-            "chat_name": target_names.get(
-                chat_id,
-                "",
-            ),
-            "message_id": str(message_id),
-            "raw_symbol": raw_symbol,
+        received_at = time.time()
+
+        telegram_date = (
+            event.date.isoformat()
+            if event.date
+            else ""
+        )
+
+        edit_date = (
+            event.edit_date.isoformat()
+            if event.edit_date
+            else ""
+        )
+
+        chat_name = target_names.get(
+            chat_id,
+            "",
+        )
+
+        raw_symbol = extract_oi_symbol(text)
+
+        # ========================================================
+        # LIVE TRADING HOT PATH
+        #
+        # 웹 DB / sender / 사진 / Pillow를 기다리지 않는다.
+        # ========================================================
+
+        if raw_symbol:
+            # 오래 지난 수정본은 실매매로 보내지 않는다.
+            allow_trade_event = True
+
+            if event_type == "EDIT":
+                message_date_obj = event.date
+                edit_date_obj = event.edit_date
+
+                if (
+                    message_date_obj
+                    and edit_date_obj
+                ):
+                    edit_age = (
+                        edit_date_obj
+                        - message_date_obj
+                    ).total_seconds()
+
+                    if (
+                        edit_age
+                        > EDIT_MAX_AGE_SECONDS
+                    ):
+                        allow_trade_event = False
+
+                        print(
+                            "[OI EDIT TRADE SKIP]",
+                            "message_id =",
+                            message_id,
+                            "age_seconds =",
+                            edit_age,
+                            flush=True,
+                        )
+
+            if allow_trade_event:
+                payload = {
+                    "chat_id": str(chat_id),
+                    "chat_name": chat_name,
+                    "message_id": str(
+                        message_id
+                    ),
+                    "raw_symbol": raw_symbol,
+                    "event_type": event_type,
+                    "text": text,
+                    "telegram_date": (
+                        telegram_date
+                    ),
+                    "edit_date": edit_date,
+                    "received_at": str(
+                        received_at
+                    ),
+                }
+
+                stream_id = (
+                    redis_client.xadd(
+                        REDIS_STREAM,
+                        payload,
+                        maxlen=REDIS_MAXLEN,
+                        approximate=True,
+                    )
+                )
+
+                print()
+                print("=" * 80)
+                print("[OI -> REDIS]")
+                print(
+                    "event_type =",
+                    event_type,
+                )
+                print(
+                    "stream_id =",
+                    stream_id,
+                )
+                print(
+                    "chat_id   =",
+                    chat_id,
+                )
+                print(
+                    "chat_name =",
+                    chat_name,
+                )
+                print(
+                    "message_id =",
+                    message_id,
+                )
+                print(
+                    "raw_symbol =",
+                    raw_symbol,
+                )
+                print(
+                    "=" * 80,
+                    flush=True,
+                )
+
+        # ========================================================
+        # WEB HISTORY PATH
+        #
+        # 모든 멍꿀단 메시지.
+        # 절대로 queue 완료를 기다리지 않는다.
+        # ========================================================
+
+        history_job = {
+            "event": event,
+            "chat_id": chat_id,
+            "chat_name": chat_name,
+            "message_id": message_id,
+            "event_type": event_type,
             "text": text,
-            "telegram_date": (
-                event.date.isoformat()
-                if event.date
-                else ""
-            ),
-            "received_at": str(time.time()),
+            "raw_symbol": raw_symbol,
+            "telegram_date": telegram_date,
+            "edit_date": edit_date,
+            "received_at": received_at,
         }
 
-        stream_id = redis_client.xadd(
-            REDIS_STREAM,
-            payload,
-            maxlen=REDIS_MAXLEN,
-            approximate=True,
-        )
+        try:
+            history_queue.put_nowait(
+                history_job
+            )
 
-        print()
-        print("=" * 80)
-        print("[OI -> REDIS]")
-        print("event_type =", event_type)
-        print("stream_id =", stream_id)
-        print("chat_id   =", chat_id)
-        print(
-            "chat_name =",
-            target_names.get(chat_id, ""),
-        )
-        print("message_id =", message_id)
-        print("raw_symbol =", raw_symbol)
-        print("=" * 80, flush=True)
+        except asyncio.QueueFull:
+            # 웹 기록 누락은 허용한다.
+            # 실매매는 이미 위에서 처리됐다.
+            print(
+                "[WEB HISTORY DROP]",
+                "message_id =",
+                message_id,
+                "reason = QUEUE_FULL",
+                flush=True,
+            )
 
     client.add_event_handler(
         handler,
