@@ -8,6 +8,7 @@ import time
 import redis
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telegram_latency_probe import TelegramLatencyProbe
 from surge_message_history import (
     get_previous_text,
     make_webp,
@@ -382,6 +383,8 @@ async def main():
         history_worker()
     )
 
+    latency_probe = TelegramLatencyProbe()
+
     async def handler(event):
         text = event.raw_text or ""
 
@@ -398,6 +401,9 @@ async def main():
         message_id = int(event.id)
 
         received_at = time.time()
+        raw_to_handler_ms = latency_probe.measure(
+            event.message, event_type
+        )
 
         telegram_date = (
             event.date.isoformat()
@@ -417,6 +423,23 @@ async def main():
         )
 
         raw_symbol = extract_oi_symbol(text)
+
+        if raw_symbol:
+            reference_date = (
+                event.edit_date
+                if event_type == 'EDIT' and event.edit_date
+                else event.date
+            )
+            print(
+                '[TELEGRAM LATENCY]',
+                'message_id =', message_id,
+                'event_type =', event_type,
+                'raw_to_handler_ms =', raw_to_handler_ms,
+                'telegram_to_handler_s =',
+                round(received_at - reference_date.timestamp(), 3)
+                if reference_date else None,
+                flush=True,
+            )
 
         # ========================================================
         # LIVE TRADING HOT PATH
@@ -551,6 +574,11 @@ async def main():
                 "reason = QUEUE_FULL",
                 flush=True,
             )
+
+    client.add_event_handler(
+        latency_probe.raw_handler,
+        events.Raw(),
+    )
 
     client.add_event_handler(
         handler,
