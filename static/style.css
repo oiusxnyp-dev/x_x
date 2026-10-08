@@ -2467,3 +2467,24 @@ input:focus {
         margin-right: 10px;
     }
 }
+
+
+/* Latest OI surge card */
+.surge-latest-oi-section {
+    margin: 16px 0 20px;
+}
+
+.surge-latest-oi-title {
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+#surge-latest-oi .surge-recent-item {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+}
+
+#surge-latest-oi .surge-recent-text {
+    white-space: pre-wrap;
+}

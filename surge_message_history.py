@@ -725,3 +725,53 @@ def get_message_feed(
         "next_cursor": next_cursor,
         "has_more": next_cursor is not None,
     }
+
+
+def get_latest_oi_surge():
+    history = _history_rows()
+    history_keys = {
+        (int(r["chat_id"]), int(r["message_id"]))
+        for r in history
+    }
+
+    legacy = {}
+    for row in _legacy_archive_rows() + _legacy_live_rows():
+        key = (int(row["chat_id"]), int(row["message_id"]))
+        if key not in history_keys:
+            legacy[key] = row
+
+    rows = history + list(legacy.values())
+
+    matched = [
+        r for r in rows
+        if _looks_like_surge(r.get("text") or "")
+    ]
+
+    if not matched:
+        return None
+
+    newest = max(
+        matched,
+        key=lambda r: (
+            r.get("message_time_iso") or "",
+            int(r["chat_id"]),
+            int(r["message_id"]),
+        ),
+    )
+
+    key = (int(newest["chat_id"]), int(newest["message_id"]))
+
+    versions = [
+        r for r in rows
+        if (int(r["chat_id"]), int(r["message_id"])) == key
+    ]
+
+    result = dict(max(versions, key=_cursor_key))
+
+    if result.get("source") != "history":
+        result["legacy_was_edited"] = bool(
+            result.get("edit_time_iso")
+        )
+        result["event_type"] = "NEW"
+
+    return result

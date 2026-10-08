@@ -1403,6 +1403,52 @@
         `;
     }
 
+    const latestOiContainer =
+        document.getElementById("surge-latest-oi");
+
+    let latestOiSignature = "";
+    let latestOiPolling = false;
+
+    async function refreshLatestOi() {
+        if (!latestOiContainer || latestOiPolling) return;
+
+        latestOiPolling = true;
+
+        try {
+            const response = await fetch(
+                "/api/surge/latest-oi",
+                { cache: "no-store" }
+            );
+
+            if (!response.ok) {
+                throw new Error("latest OI HTTP error");
+            }
+
+            const data = await response.json();
+
+            if (!data.ok) {
+                throw new Error(data.error || "latest OI failed");
+            }
+
+            const row = data.message;
+            const signature = row
+                ? JSON.stringify(row)
+                : "empty";
+
+            if (signature === latestOiSignature) return;
+
+            latestOiContainer.innerHTML = row
+                ? renderCard(row)
+                : '<div class="surge-recent-empty">급등종목 메시지가 없습니다.</div>';
+
+            latestOiSignature = signature;
+        } catch (error) {
+            console.error("Latest OI:", error);
+        } finally {
+            latestOiPolling = false;
+        }
+    }
+
     function makeFragment(messages) {
         const template =
             document.createElement(
@@ -1730,6 +1776,16 @@
         photoModal = overlay;
     }
 
+    if (latestOiContainer) {
+        latestOiContainer.addEventListener("click", (event) => {
+            const button = event.target.closest("[data-surge-photo]");
+            if (!button) return;
+
+            const src = button.getAttribute("data-surge-photo");
+            if (src) openPhotoModal(src);
+        });
+    }
+
     container.addEventListener(
         "click",
         (event) => {
@@ -1801,6 +1857,9 @@
             });
         });
     }
+
+    refreshLatestOi();
+    window.setInterval(refreshLatestOi, POLL_MS);
 
     initialLoad().then(() => {
         window.setInterval(

@@ -243,6 +243,20 @@ async def surge_media_api(
     )
 
 
+@app.get("/api/surge/latest-oi")
+async def surge_latest_oi_api(request: Request):
+    user = current_user(request)
+    if not user:
+        return {"ok": False, "error": "not_authenticated"}
+
+    try:
+        from surge_message_history import get_latest_oi_surge
+        message = await asyncio.to_thread(get_latest_oi_surge)
+        return {"ok": True, "message": message}
+    except Exception:
+        return {"ok": False, "error": "latest_oi_failed"}
+
+
 @app.get("/api/surge/recent-messages")
 async def surge_recent_messages_api(
     request: Request,
