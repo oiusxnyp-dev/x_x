@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 import json
 import os
 import re
@@ -622,9 +623,32 @@ async def main():
                             ).fetchone()
                         return row is not None
 
-                    if await asyncio.to_thread(already_saved):
+                    exists = await asyncio.to_thread(
+                        already_saved
+                    )
+                    # Existing rows with missing photos need repair.
+                    if exists and not message.photo:
                         skipped += 1
                         continue
+                    if exists and message.photo:
+                        def has_photo():
+                            with sqlite3.connect(DB_PATH) as con:
+                                return con.execute(
+                                    """
+                                    SELECT 1
+                                    FROM surge_message_versions
+                                    WHERE chat_id = ?
+                                      AND message_id = ?
+                                      AND media_path IS NOT NULL
+                                      AND media_path != ''
+                                    LIMIT 1
+                                    """,
+                                    (chat_id, message_id),
+                                ).fetchone() is not None
+
+                        if await asyncio.to_thread(has_photo):
+                            skipped += 1
+                            continue
 
                     date_obj = message.date
                     if date_obj is None:
@@ -715,6 +739,41 @@ async def main():
                             repr(exc),
                             flush=True,
                         )
+
+                    if exists:
+                        if media_path:
+                            def repair_photo():
+                                with sqlite3.connect(DB_PATH) as con:
+                                    cur = con.execute(
+                                        """
+                                        UPDATE surge_message_versions
+                                        SET media_type = ?,
+                                            media_path = ?
+                                        WHERE chat_id = ?
+                                          AND message_id = ?
+                                          AND (
+                                              media_path IS NULL
+                                              OR media_path = ''
+                                          )
+                                        """,
+                                        (
+                                            "photo",
+                                            media_path,
+                                            chat_id,
+                                            message_id,
+                                        ),
+                                    )
+                                    con.commit()
+                                    return cur.rowcount
+
+                            repaired = await asyncio.to_thread(
+                                repair_photo
+                            )
+                            inserted += repaired
+                        else:
+                            errors += 1
+                        await asyncio.sleep(0.05)
+                        continue
 
                     try:
                         saved = await asyncio.to_thread(
