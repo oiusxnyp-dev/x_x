@@ -565,6 +565,222 @@ async def main():
         ),
     )
 
+
+    # ========================================================
+    # WEB-ONLY TELEGRAM HISTORY BACKFILL
+    # Never call the live trading handler or Redis XADD.
+    # ========================================================
+    async def backfill_web_history():
+        from datetime import datetime, timezone
+        from surge_message_history import (
+            DB_PATH,
+            save_message_version,
+            make_webp,
+        )
+        import sqlite3
+
+        LIMIT_PER_CHAT = 100
+
+        print(
+            "[WEB BACKFILL] START",
+            "limit_per_chat =",
+            LIMIT_PER_CHAT,
+            flush=True,
+        )
+
+        for chat_id in sorted(target_ids):
+            chat_name = target_names[chat_id]
+            inserted = 0
+            skipped = 0
+            errors = 0
+
+            try:
+                async for message in client.iter_messages(
+                    chat_id,
+                    limit=LIMIT_PER_CHAT,
+                ):
+                    if not message:
+                        continue
+
+                    message_id = int(message.id)
+                    text = message.raw_text or ""
+                    raw_symbol = extract_oi_symbol(text)
+
+                    # Skip existing history versions.
+                    # Never overwrite observed NEW/EDIT events.
+                    def already_saved():
+                        with sqlite3.connect(DB_PATH) as con:
+                            row = con.execute(
+                                """
+                                SELECT 1
+                                FROM surge_message_versions
+                                WHERE chat_id = ?
+                                  AND message_id = ?
+                                LIMIT 1
+                                """,
+                                (chat_id, message_id),
+                            ).fetchone()
+                        return row is not None
+
+                    if await asyncio.to_thread(already_saved):
+                        skipped += 1
+                        continue
+
+                    date_obj = message.date
+                    if date_obj is None:
+                        skipped += 1
+                        continue
+
+                    if date_obj.tzinfo is None:
+                        date_obj = date_obj.replace(
+                            tzinfo=timezone.utc
+                        )
+
+                    original_ts = date_obj.timestamp()
+
+                    sender_id = message.sender_id
+                    sender_name = ""
+                    sender_username = ""
+
+                    try:
+                        sender = await message.get_sender()
+                        if sender is not None:
+                            sender_id = (
+                                getattr(sender, "id", None)
+                                or sender_id
+                            )
+                            sender_username = (
+                                getattr(sender, "username", None)
+                                or ""
+                            )
+                            sender_name = " ".join(
+                                x for x in (
+                                    getattr(sender, "first_name", "") or "",
+                                    getattr(sender, "last_name", "") or "",
+                                )
+                                if x
+                            ).strip()
+                            if not sender_name:
+                                sender_name = (
+                                    getattr(sender, "title", None)
+                                    or sender_username
+                                    or ""
+                                )
+                    except Exception as exc:
+                        print(
+                            "[WEB BACKFILL SENDER WARNING]",
+                            chat_id,
+                            message_id,
+                            repr(exc),
+                            flush=True,
+                        )
+
+                    media_type = None
+                    media_path = None
+
+                    try:
+                        if message.photo:
+                            temp_dir = (
+                                Path(__file__).resolve().parent
+                                / "telegram_downloads"
+                            )
+                            temp_dir.mkdir(
+                                parents=True,
+                                exist_ok=True,
+                            )
+                            temp_target = (
+                                temp_dir
+                                / (
+                                    f"backfill_{abs(chat_id)}_"
+                                    f"{message_id}_{int(original_ts)}"
+                                )
+                            )
+                            downloaded = await message.download_media(
+                                file=str(temp_target)
+                            )
+                            if downloaded:
+                                media_path = await asyncio.to_thread(
+                                    make_webp,
+                                    downloaded,
+                                    chat_id,
+                                    message_id,
+                                    original_ts,
+                                )
+                                media_type = "photo"
+                    except Exception as exc:
+                        print(
+                            "[WEB BACKFILL MEDIA WARNING]",
+                            chat_id,
+                            message_id,
+                            repr(exc),
+                            flush=True,
+                        )
+
+                    try:
+                        saved = await asyncio.to_thread(
+                            save_message_version,
+                            chat_id=chat_id,
+                            chat_name=chat_name,
+                            message_id=message_id,
+                            event_type="NEW",
+                            text=text,
+                            previous_text=None,
+                            is_surge=bool(raw_symbol),
+                            raw_symbol=raw_symbol,
+                            sender_id=sender_id,
+                            sender_name=sender_name,
+                            sender_username=sender_username,
+                            telegram_date=message.date.isoformat(),
+                            edit_date=(
+                                message.edit_date.isoformat()
+                                if message.edit_date
+                                else ""
+                            ),
+                            received_at=original_ts,
+                            media_type=media_type,
+                            media_path=media_path,
+                        )
+                        if saved:
+                            inserted += 1
+                        else:
+                            skipped += 1
+                    except Exception as exc:
+                        errors += 1
+                        print(
+                            "[WEB BACKFILL SAVE WARNING]",
+                            chat_id,
+                            message_id,
+                            repr(exc),
+                            flush=True,
+                        )
+
+                    # Yield control to live Telegram updates.
+                    await asyncio.sleep(0.05)
+
+            except Exception as exc:
+                errors += 1
+                print(
+                    "[WEB BACKFILL CHAT WARNING]",
+                    chat_id,
+                    repr(exc),
+                    flush=True,
+                )
+
+            print(
+                "[WEB BACKFILL CHAT DONE]",
+                "chat_id =", chat_id,
+                "inserted =", inserted,
+                "skipped =", skipped,
+                "errors =", errors,
+                flush=True,
+            )
+
+        print("[WEB BACKFILL] DONE", flush=True)
+
+    # Event handlers are registered above.
+    # Backfill runs independently from live trading.
+    asyncio.create_task(backfill_web_history())
+
     await client.run_until_disconnected()
 
 
