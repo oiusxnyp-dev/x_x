@@ -1213,9 +1213,15 @@
             );
 
         const legacyEdited =
-            Boolean(
-                row.legacy_was_edited
-            );
+            Boolean(row.legacy_was_edited);
+
+        const historicalEdited =
+            row.source === "history" &&
+            row.event_type === "NEW" &&
+            Boolean(row.edit_time_iso);
+
+        const wasEdited =
+            legacyEdited || historicalEdited;
 
         const classes = [
             "surge-recent-item",
@@ -1270,7 +1276,7 @@
             badges.push(
                 '<span class="surge-feed-badge surge-feed-badge--edit">수정 데이터</span>'
             );
-        } else if (legacyEdited) {
+        } else if (wasEdited) {
             badges.push(
                 '<span class="surge-feed-badge surge-feed-badge--legacy-edit">수정됨</span>'
             );
@@ -1297,7 +1303,7 @@
 
         let editNote = "";
 
-        if (legacyEdited) {
+        if (wasEdited) {
             editNote = `
                 <div class="surge-feed-edit-note">
                     과거 데이터는 수정 전 원문이
