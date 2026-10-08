@@ -963,6 +963,90 @@
 
     const knownKeys = new Set();
 
+    const POSITION_KEY = "surge-feed-position-v1";
+    let restoringPosition = false;
+    let restoreScrollPending = false;
+
+    function saveFeedPosition() {
+        if (!initialized || restoringPosition) return;
+
+        const cards = container.querySelectorAll(
+            "[data-event-key]"
+        );
+
+        for (const card of cards) {
+            const offset = card.offsetLeft - container.offsetLeft;
+            const width = card.getBoundingClientRect().width;
+
+            if (offset + width > container.scrollLeft + 2) {
+                try {
+                    localStorage.setItem(
+                        POSITION_KEY,
+                        JSON.stringify({
+                            key: card.dataset.eventKey,
+                            offset: container.scrollLeft - offset,
+                        })
+                    );
+                } catch (_) {}
+                return;
+            }
+        }
+    }
+
+    function readFeedPosition() {
+        try {
+            const raw = localStorage.getItem(POSITION_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async function restoreFeedPosition() {
+        const saved = readFeedPosition();
+
+        if (!saved || !saved.key) return;
+
+        restoringPosition = true;
+
+        try {
+            let target = null;
+            let pages = 0;
+
+            while (pages < 100) {
+                target = Array.from(
+                    container.querySelectorAll("[data-event-key]")
+                ).find(
+                    (card) => card.dataset.eventKey === saved.key
+                );
+
+                if (target || !hasMore || !nextCursor) break;
+
+                const previousCursor = nextCursor;
+                await loadOlder();
+                pages += 1;
+
+                if (nextCursor === previousCursor) break;
+            }
+
+            if (target) {
+                const offset =
+                    target.offsetLeft - container.offsetLeft;
+
+                restoreScrollPending = true;
+
+                container.scrollLeft =
+                    offset + (Number(saved.offset) || 0);
+
+                requestAnimationFrame(() => {
+                    restoreScrollPending = false;
+                });
+            }
+        } finally {
+            restoringPosition = false;
+        }
+    }
+
     function escapeHtml(value) {
         return String(value ?? "")
             .replaceAll("&", "&amp;")
@@ -1417,6 +1501,8 @@
 
             initialized = true;
 
+            await restoreFeedPosition();
+
         } catch (error) {
             console.error(
                 "Telegram message feed:",
@@ -1490,7 +1576,8 @@
     async function pollNewest() {
         if (
             !initialized ||
-            polling
+            polling ||
+            restoringPosition
         ) {
             return;
         }
@@ -1674,6 +1761,12 @@
     container.addEventListener(
         "scroll",
         () => {
+            if (restoringPosition || restoreScrollPending) {
+                return;
+            }
+
+            saveFeedPosition();
+
             const remaining =
                 container.scrollWidth -
                 container.clientWidth -
