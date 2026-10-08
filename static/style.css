@@ -2488,3 +2488,26 @@ input:focus {
 #surge-latest-oi .surge-recent-text {
     white-space: pre-wrap;
 }
+
+/* Telegram edit difference highlighting */
+.surge-recent-text .surge-diff-added {
+    background: #18e86b;
+    color: #07190d;
+    border-radius: 3px;
+    padding: 1px 2px;
+}
+
+.surge-recent-text .surge-diff-changed {
+    background: #ffe34d;
+    color: #242000;
+    border-radius: 3px;
+    padding: 1px 2px;
+}
+
+.surge-recent-text .surge-diff-deleted {
+    background: #ff5267;
+    color: #ffffff;
+    text-decoration: line-through;
+    text-decoration-thickness: 2px;
+    border-radius: 3px;
+}

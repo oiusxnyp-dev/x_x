@@ -1202,6 +1202,115 @@
         return `${id}번 메시지`;
     }
 
+
+    function renderMessageDiff(previous, current) {
+        const oldText = String(previous ?? "");
+        const newText = String(current ?? "");
+
+        if (oldText === newText) {
+            return escapeHtml(newText);
+        }
+
+        const tokenize = (value) =>
+            value.match(/\s+|[^\s]+/gu) || [];
+
+        const a = tokenize(oldText);
+        const b = tokenize(newText);
+
+        if (a.length * b.length > 250000) {
+            // 비교량이 지나치게 크면 잘못된 전체 강조를 피한다.
+            return escapeHtml(newText);
+        }
+
+        const dp = Array.from(
+            { length: a.length + 1 },
+            () => new Uint32Array(b.length + 1)
+        );
+
+        for (let i = a.length - 1; i >= 0; i--) {
+            for (let j = b.length - 1; j >= 0; j--) {
+                dp[i][j] = a[i] === b[j]
+                    ? dp[i + 1][j + 1] + 1
+                    : Math.max(
+                        dp[i + 1][j],
+                        dp[i][j + 1]
+                    );
+            }
+        }
+
+        const operations = [];
+        let i = 0;
+        let j = 0;
+
+        while (i < a.length || j < b.length) {
+            if (
+                i < a.length &&
+                j < b.length &&
+                a[i] === b[j]
+            ) {
+                operations.push(["same", a[i++]]);
+                j++;
+            } else if (
+                j < b.length &&
+                (
+                    i === a.length ||
+                    dp[i][j + 1] >= dp[i + 1][j]
+                )
+            ) {
+                operations.push(["add", b[j++]]);
+            } else {
+                operations.push(["delete", a[i++]]);
+            }
+        }
+
+        const groups = [];
+
+        for (const [type, value] of operations) {
+            const last = groups[groups.length - 1];
+
+            if (last && last.type === type) {
+                last.text += value;
+            } else {
+                groups.push({ type, text: value });
+            }
+        }
+
+        return groups.map((group, index) => {
+            const value = escapeHtml(group.text);
+
+            if (group.type === "same") {
+                return value;
+            }
+
+            if (group.type === "delete") {
+                return (
+                    '<del class="surge-diff-deleted">' +
+                    value +
+                    '</del>'
+                );
+            }
+
+            const previousGroup = groups[index - 1];
+            const nextGroup = groups[index + 1];
+
+            const replaced =
+                previousGroup?.type === "delete" ||
+                nextGroup?.type === "delete";
+
+            return (
+                '<mark class="' +
+                (
+                    replaced
+                        ? "surge-diff-changed"
+                        : "surge-diff-added"
+                ) +
+                '">' +
+                value +
+                '</mark>'
+            );
+        }).join("");
+    }
+
     function renderCard(row) {
         const surge =
             Boolean(row.is_surge);
@@ -1259,10 +1368,17 @@
                 messageLabel(row)
             );
 
-        const body =
-            escapeHtml(
+        const hasPreviousText =
+            edit &&
+            row.previous_text !== null &&
+            row.previous_text !== undefined;
+
+        const body = hasPreviousText
+            ? renderMessageDiff(
+                row.previous_text,
                 row.text || ""
-            );
+            )
+            : escapeHtml(row.text || "");
 
         const badges = [];
 
