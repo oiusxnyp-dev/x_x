@@ -424,23 +424,6 @@ async def main():
 
         raw_symbol = extract_oi_symbol(text)
 
-        if raw_symbol:
-            reference_date = (
-                event.edit_date
-                if event_type == 'EDIT' and event.edit_date
-                else event.date
-            )
-            print(
-                '[TELEGRAM LATENCY]',
-                'message_id =', message_id,
-                'event_type =', event_type,
-                'raw_to_handler_ms =', raw_to_handler_ms,
-                'telegram_to_handler_s =',
-                round(received_at - reference_date.timestamp(), 3)
-                if reference_date else None,
-                flush=True,
-            )
-
         # ========================================================
         # LIVE TRADING HOT PATH
         #
@@ -505,6 +488,23 @@ async def main():
                         maxlen=REDIS_MAXLEN,
                         approximate=True,
                     )
+                )
+
+                reference_date = (
+                    event.edit_date
+                    if event_type == "EDIT" and event.edit_date
+                    else event.date
+                )
+                print(
+                    "[TELEGRAM LATENCY]",
+                    "message_id =", message_id,
+                    "event_type =", event_type,
+                    "raw_to_handler_ms =", raw_to_handler_ms,
+                    "telegram_to_handler_s =",
+                    round(
+                        received_at - reference_date.timestamp(), 3
+                    ) if reference_date else None,
+                    flush=True,
                 )
 
                 print()
