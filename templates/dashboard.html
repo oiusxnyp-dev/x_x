@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Surge Trading Room</title>
-    <link rel="stylesheet" href="/static/style.css?v=8853bb6-feed">
+    <link rel="stylesheet" href="/static/style.css?v=feed-controls-2">
 </head>
 
 <body>
@@ -115,7 +115,15 @@
                 </div>
             </div>
 
+
             <button
+                id="surge-feed-latest"
+                class="surge-settings-toggle"
+                type="button"
+            >
+                최신 메시지
+            </button>
+<button
                 id="surge-settings-toggle"
                 class="surge-settings-toggle"
                 type="button"
@@ -132,18 +140,7 @@
                 >▼</span>
             </button>
         </div>
-
-        <div
-            id="surge-recent-messages"
-            class="surge-recent-messages"
-        >
-            <div class="surge-recent-empty">
-                최근 메시지를 불러오는 중...
-            </div>
-        </div>
-    </section>
-
-    <section
+<section
         id="surge-settings-panel"
         class="surge-settings-card"
         hidden
@@ -312,10 +309,23 @@
 
     </section>
 
+
+        <div
+            id="surge-recent-messages"
+            class="surge-recent-messages"
+        >
+            <div class="surge-recent-empty">
+                최근 메시지를 불러오는 중...
+            </div>
+        </div>
+    </section>
+
+
+
 </main>
 
 
-<script src="/static/dashboard.js?v=scroll-restore-1"></script>
+<script src="/static/dashboard.js?v=feed-controls-2"></script>
 </body>
 
 </html>

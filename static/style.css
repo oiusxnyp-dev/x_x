@@ -2450,3 +2450,20 @@ input:focus {
         max-height: 90vh;
     }
 }
+
+
+/* Feed header controls */
+.surge-recent-header {
+    flex-wrap: wrap;
+}
+
+.surge-recent-card > .surge-settings-card {
+    margin: 0 16px 12px;
+}
+
+@media (max-width: 430px) {
+    .surge-recent-card > .surge-settings-card {
+        margin-left: 10px;
+        margin-right: 10px;
+    }
+}

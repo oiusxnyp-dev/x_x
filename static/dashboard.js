@@ -1781,6 +1781,21 @@
         }
     );
 
+    const latestButton =
+        document.getElementById("surge-feed-latest");
+
+    if (latestButton) {
+        latestButton.addEventListener("click", () => {
+            try {
+                localStorage.removeItem(POSITION_KEY);
+            } catch (_) {}
+            container.scrollTo({
+                left: 0,
+                behavior: "smooth"
+            });
+        });
+    }
+
     initialLoad().then(() => {
         window.setInterval(
             pollNewest,
