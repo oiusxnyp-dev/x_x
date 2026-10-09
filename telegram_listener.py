@@ -139,6 +139,19 @@ async def process_signal(fields):
                 dry_run=False,
             )
         except Exception as exc:
+            import traceback
+
+            print(
+                "[SURGE USER EXECUTION EXCEPTION]",
+                "user_id =", uid,
+                "message_id =", message_id,
+                "symbol =", symbol,
+                "error =",
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            traceback.print_exc()
+
             return {
                 "ok": False,
                 "dry_run": False,
@@ -186,6 +199,12 @@ async def process_signal(fields):
         print("position   =", result.get("position_idx"))
         print("executed   =", result.get("executed"))
         print("reason     =", result.get("reason"))
+        if result.get("error"):
+            print(
+                "error      =",
+                result["error"],
+                flush=True,
+            )
 
         final_plan = (
             result
